@@ -103,11 +103,13 @@ export default function DashboardPage({ user }) {
 
   return (
     <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6">
-      <section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
-          <p className="text-sm font-medium text-primary">RESUMEN DE TU TIENDA</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-on-surface sm:text-3xl">¡Hola{user?.name ? `, ${user.name}` : ''}!</h1>
-          <p className="mt-1 text-sm text-on-surface-variant">Aquí tienes un resumen de tu tienda hoy.</p>
+      <section className="flex flex-col justify-between gap-3 rounded-xl bg-surface-container-lowest p-2.5 shadow-sm sm:flex-row sm:items-center">
+        <div className="flex items-center gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-on-primary"><span className="material-symbols-outlined text-[20px]">space_dashboard</span></span>
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight text-on-surface">¡Hola{user?.name ? `, ${user.name}` : ''}!</h1>
+            <p className="mt-0.5 text-xs text-on-surface-variant">Aquí tienes un resumen de tu tienda hoy.</p>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex w-fit items-center gap-2 rounded-xl border border-primary-fixed-dim/30 bg-white px-3.5 py-2.5 text-sm text-on-surface shadow-sm">

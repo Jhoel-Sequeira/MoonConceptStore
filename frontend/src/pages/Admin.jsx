@@ -149,16 +149,15 @@ export default function AdminPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6">
-      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-primary">
-            <span className="material-symbols-outlined text-[18px]">admin_panel_settings</span>
-            <span>Administración del sistema</span>
+      <header className="flex flex-col justify-between gap-3 rounded-xl bg-surface-container-lowest p-2.5 shadow-sm sm:flex-row sm:items-center">
+        <div className="flex items-center gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-on-primary"><span className="material-symbols-outlined text-[20px]">admin_panel_settings</span></span>
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight text-on-surface">Usuarios y permisos</h1>
+            <p className="mt-0.5 text-xs text-on-surface-variant">Crea cuentas, asigna roles y controla el acceso al sistema.</p>
           </div>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-on-surface sm:text-3xl">Usuarios y permisos</h1>
-          <p className="mt-1 text-sm text-on-surface-variant">Crea cuentas, asigna roles y controla el acceso al sistema.</p>
         </div>
-        <button type="button" onClick={openCreateModal} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-on-primary shadow-sm hover:opacity-95">
+        <button type="button" onClick={openCreateModal} className="inline-flex h-9 items-center justify-center gap-2 self-start rounded-lg bg-primary px-3.5 text-sm font-semibold text-on-primary shadow-sm hover:opacity-95 sm:self-center">
           <span className="material-symbols-outlined text-[18px]">person_add</span>
           Crear usuario
         </button>

@@ -53,7 +53,7 @@ export default function RentaPage() {
   };
 
   return <section className="mx-auto max-w-7xl space-y-6">
-    <header><p className="text-sm font-semibold uppercase tracking-[.18em] text-primary">Administración</p><h1 className="mt-1 text-3xl font-bold text-on-surface">Renta</h1><p className="mt-1 text-on-surface-variant">Control de rentas por marca y registro de pagos.</p></header>
+    <header className="flex flex-col justify-between gap-3 rounded-xl bg-surface-container-lowest p-2.5 shadow-sm sm:flex-row sm:items-center"><div className="flex items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-on-primary"><span className="material-symbols-outlined text-[20px]">payments</span></span><div><h1 className="text-lg font-semibold tracking-tight text-on-surface">Renta</h1><p className="mt-0.5 text-xs text-on-surface-variant">Control de rentas por marca y registro de pagos.</p></div></div></header>
     {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
     <div className="grid gap-4 sm:grid-cols-2">
       <div className="rounded-2xl bg-white p-5 shadow-sm"><p className="text-sm text-on-surface-variant">Renta total registrada</p><p className="mt-2 text-2xl font-bold">{money(totals.due)}</p></div>

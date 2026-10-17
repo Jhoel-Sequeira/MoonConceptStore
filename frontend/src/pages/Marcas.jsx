@@ -352,15 +352,16 @@ export default function MarcasPage() {
     <div className="flex flex-col w-full gap-6 mx-auto pb-12">
 
       {/* 1. TOP CONTEXT HEADER & ACTIONS */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="flex flex-col rounded-xl bg-surface-container-lowest p-2.5 shadow-sm sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
           {/* <nav className="flex items-center gap-1 text-slate-400 text-xs font-semibold tracking-wide uppercase">
             <span>Operaciones</span>
             <span className="material-symbols-outlined text-[14px]">chevron_right</span>
             <span className="text-indigo-600 font-semibold">Alianzas Comerciales</span>
           </nav> */}
-          <div className="flex items-baseline gap-3">
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Gestión de Marcas Aliadas</h1>
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-on-primary"><span className="material-symbols-outlined text-[20px]">loyalty</span></span>
+            <h1 className="text-lg font-bold tracking-tight text-on-surface">Gestión de Marcas Aliadas</h1>
 
           </div>
           <p className="text-sm text-slate-500 max-w-3xl">
