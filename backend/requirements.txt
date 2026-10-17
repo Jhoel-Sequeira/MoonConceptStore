@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+sqlalchemy
+psycopg[binary]>=3.2,<4
+alembic
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+qrcode[pil]
+pillow
+python-dotenv
