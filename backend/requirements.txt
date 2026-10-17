@@ -11,3 +11,4 @@ python-multipart
 qrcode[pil]
 pillow
 python-dotenv
+supabase==2.33.0

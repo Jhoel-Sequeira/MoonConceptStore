@@ -225,7 +225,7 @@ export default function CatalogoQRPage() {
       setDetailProduct(updatedProduct);
       setPreviewProduct(updatedProduct);
       setProductos(productos.map(p => p.id === product.id ? updatedProduct : p));
-      alert("¡Código QR generado y guardado como imagen en el servidor exitosamente!");
+      alert("¡Código QR generado y guardado en Supabase Storage!");
     } catch (err) {
       console.error("Error al generar QR:", err);
       alert("Error al generar QR: " + (err.response?.data?.detail || err.message));

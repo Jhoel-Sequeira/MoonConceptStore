@@ -16,6 +16,7 @@ from app.models.marcas import Marca, Cuenta
 from app.models.inventario import Kardex, Producto
 from app.models.ingresos import Ingreso, IngresoDetalle
 from app.schemas.marcas import MarcaCreate, MarcaUpdate
+from app.core.storage import download_image
 
 class MarcasService:
     @staticmethod
@@ -248,13 +249,18 @@ class MarcasService:
         ws.merge_cells("A2:A3")
         logo_inserted = False
         if getattr(marca, "logo", None):
-            clean_logo = marca.logo.lstrip("/").replace("/", os.sep)
-            if os.path.exists(clean_logo):
+            logo_content = download_image(marca.logo)
+            if logo_content is None:
+                clean_logo = marca.logo.lstrip("/").replace("/", os.sep)
+                if os.path.exists(clean_logo):
+                    with open(clean_logo, "rb") as logo_file:
+                        logo_content = logo_file.read()
+            if logo_content:
                 try:
-                    with PILImage.open(clean_logo) as image:
+                    with PILImage.open(io.BytesIO(logo_content)) as image:
                         w, h = image.size
                         ratio = min(82 / w, 50 / h, 1.0)
-                    logo = OpenpyxlImage(clean_logo)
+                    logo = OpenpyxlImage(io.BytesIO(logo_content))
                     logo.width, logo.height = int(w * ratio), int(h * ratio)
                     ws.add_image(logo, "A2")
                     logo_inserted = True

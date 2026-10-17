@@ -2,11 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
+import os
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.usuarios import Usuario
 from app.schemas.marcas import MarcaCreate, MarcaUpdate, MarcaResponse
 from app.services.marcas_service import MarcasService
+from app.core.storage import delete_image, upload_image
 
 router = APIRouter()
 
@@ -85,12 +87,10 @@ def upload_logo(
     db: Session = Depends(get_db)
 ):
     """Subir imagen de logo de una marca y guardar la ruta en base de datos"""
-    import os
-    import uuid
-
     marca = MarcasService.get_by_id(db, marca_id)
     if not marca:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marca no encontrada")
+    previous_logo_url = marca.get("logo")
 
     # Extensiones permitidas
     ext = os.path.splitext(file.filename)[1].lower()
@@ -100,17 +100,19 @@ def upload_logo(
             detail="Formato de imagen no soportado. Usa PNG, JPG, WEBP o SVG."
         )
 
-    # Nombre de archivo único
-    os.makedirs("uploads/logos", exist_ok=True)
-    filename = f"marca_{marca_id}_{uuid.uuid4().hex[:8]}{ext}"
-    file_path = os.path.join("uploads", "logos", filename)
-
-    with open(file_path, "wb") as buffer:
-        buffer.write(file.file.read())
-
-    # Ruta accesible vía servidor estático
-    logo_url = f"/uploads/logos/{filename}"
+    content = file.file.read(8 * 1024 * 1024 + 1)
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selecciona una imagen")
+    if len(content) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="El logo no puede superar 8 MB")
+    content_type = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp", ".svg": "image/svg+xml",
+    }[ext]
+    logo_url = upload_image(f"moonconcept/logos/{marca_id}", f"logo{ext}", content, content_type)
     updated = MarcasService.update_logo(db, marca_id, logo_url)
+    if updated:
+        delete_image(previous_logo_url or "")
     return updated
 
 @router.get("/{marca_id}/ficha-entrega")

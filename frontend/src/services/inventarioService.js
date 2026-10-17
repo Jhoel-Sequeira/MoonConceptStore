@@ -64,7 +64,6 @@ export const inventarioService = {
 
   getQrImageUrl: (id, sku, imagePath) => {
     if (imagePath) return new URL(imagePath, `${apiOrigin}/`).toString();
-    if (sku) return `${apiOrigin}/uploads/qr/qr_prod_${id}_${sku}.png`;
     return `${apiOrigin}/api/v1/inventario/${id}/qr-image`;
   },
 

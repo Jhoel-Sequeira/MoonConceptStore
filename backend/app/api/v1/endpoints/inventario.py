@@ -2,9 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, 
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from io import BytesIO
-import os
-import uuid
 from PIL import Image
+from app.core.storage import delete_image, upload_image
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.usuarios import Usuario
@@ -89,12 +88,18 @@ def update_producto(
 def delete_producto(producto_id: int, db: Session = Depends(get_db)):
     """Eliminar un producto de inventario"""
     try:
+        producto = db.query(Producto).filter(Producto.id == producto_id).first()
+        image_urls = list(producto.imagenes or []) if producto else []
+        if producto and producto.imagen_url and producto.imagen_url not in image_urls:
+            image_urls.append(producto.imagen_url)
         success = InventarioService.delete(db, producto_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Producto con ID {producto_id} no encontrado"
             )
+        for image_url in image_urls:
+            delete_image(image_url)
         return {"message": "Producto eliminado exitosamente"}
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -128,13 +133,9 @@ def upload_product_photo(
     if not extension:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato no permitido. Usa JPG, PNG o WEBP")
 
-    os.makedirs("uploads/productos", exist_ok=True)
-    filename = f"producto_{producto_id}_{uuid.uuid4().hex}{extension}"
-    relative_path = os.path.join("uploads", "productos", filename)
-    with open(relative_path, "wb") as image_file:
-        image_file.write(image_bytes)
-
-    producto.imagen_url = f"/uploads/productos/{filename}"
+    content_type = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}[extension]
+    image_url = upload_image(f"moonconcept/productos/{producto_id}", f"producto{extension}", image_bytes, content_type)
+    producto.imagen_url = image_url
     producto.imagenes = list(producto.imagenes or [])
     if producto.imagen_url not in producto.imagenes:
         producto.imagenes.append(producto.imagen_url)
@@ -142,10 +143,7 @@ def upload_product_photo(
         db.commit()
     except Exception:
         db.rollback()
-        try:
-            os.remove(relative_path)
-        except OSError:
-            pass
+        delete_image(image_url)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudo guardar la foto del producto")
 
     return {"imagen_url": producto.imagen_url}
@@ -185,17 +183,11 @@ def upload_product_photos(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato no permitido. Usa JPG, PNG o WEBP")
         prepared.append((image_bytes, extension))
 
-    os.makedirs("uploads/productos", exist_ok=True)
-    saved_paths = []
     new_urls = []
     try:
         for image_bytes, extension in prepared:
-            filename = f"producto_{producto_id}_{uuid.uuid4().hex}{extension}"
-            relative_path = os.path.join("uploads", "productos", filename)
-            with open(relative_path, "wb") as image_file:
-                image_file.write(image_bytes)
-            saved_paths.append(relative_path)
-            new_urls.append(f"/uploads/productos/{filename}")
+            content_type = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}[extension]
+            new_urls.append(upload_image(f"moonconcept/productos/{producto_id}", f"producto{extension}", image_bytes, content_type))
 
         producto.imagenes = current_images + new_urls
         if not producto.imagen_url:
@@ -204,11 +196,10 @@ def upload_product_photos(
         db.refresh(producto)
     except Exception as exc:
         db.rollback()
-        for relative_path in saved_paths:
-            try:
-                os.remove(relative_path)
-            except OSError:
-                pass
+        for image_url in new_urls:
+            delete_image(image_url)
+        if isinstance(exc, HTTPException):
+            raise
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudieron guardar las fotos del producto") from exc
 
     return {"imagenes": producto.imagenes, "imagen_url": producto.imagen_url}
@@ -236,15 +227,7 @@ def delete_product_photo(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudo quitar la foto del producto") from exc
 
-    if image_url.startswith("/uploads/productos/"):
-        relative_path = os.path.normpath(image_url.lstrip("/"))
-        uploads_root = os.path.realpath(os.path.join("uploads", "productos"))
-        image_path = os.path.realpath(relative_path)
-        if os.path.commonpath([uploads_root, image_path]) == uploads_root and os.path.isfile(image_path):
-            try:
-                os.remove(image_path)
-            except OSError:
-                pass
+    delete_image(image_url)
     return {"imagenes": producto.imagenes, "imagen_url": producto.imagen_url}
 
 @router.get("/{producto_id}/qr-image")
@@ -271,7 +254,10 @@ def regenerate_and_save_qr(producto_id: int, db: Session = Depends(get_db)):
             detail=f"Producto con ID {producto_id} no encontrado"
         )
     
-    qr_rel_path = InventarioService.save_qr_to_disk(producto.id, producto.sku)
+    qr_image = InventarioService.generate_qr_image(producto.codigo_qr or f"BHPOS-{producto.sku}")
+    qr_rel_path = upload_image(
+        f"moonconcept/qr/{producto.id}", "codigo.png", qr_image.getvalue(), "image/png"
+    )
     return {
         "message": "Código QR generado y almacenado en el servidor",
         "qr_image_url": qr_rel_path,

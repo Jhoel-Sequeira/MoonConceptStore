@@ -3,7 +3,6 @@ from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 import io
-import os
 import re
 import qrcode
 from app.models.inventario import Producto, Kardex
@@ -30,25 +29,6 @@ class InventarioService:
         return max(0, int(stock))
 
     @staticmethod
-    def save_qr_to_disk(producto_id: int, sku: str) -> str:
-        """Genera y guarda el archivo PNG del QR en uploads/qr/"""
-        os.makedirs("uploads/qr", exist_ok=True)
-        safe_sku = re.sub(r"[^A-Za-z0-9_-]", "_", (sku or "").upper())
-        file_path = f"uploads/qr/qr_prod_{producto_id}_{safe_sku}.png"
-        qr_content = f"BHPOS-{sku}"
-        
-        qr = qrcode.QRCode(
-            version=1,
-            error_correction=qrcode.constants.ERROR_CORRECT_M,
-            box_size=10,
-            border=2,
-        )
-        qr.add_data(qr_content)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        img.save(file_path, format="PNG")
-        return f"/uploads/qr/qr_prod_{producto_id}_{safe_sku}.png"
-
     @staticmethod
     def _get_stock_by_product(db: Session, producto_ids: Optional[List[int]] = None) -> dict:
         """Calcula el stock de varios productos con una sola consulta al Kardex."""
@@ -83,10 +63,7 @@ class InventarioService:
         marca_nom = p.marca.nombre_marca if p.marca else None
         marca_cod = p.marca.codigo if p.marca else None
         
-        # Verificar o crear archivo físico de QR
-        safe_sku = re.sub(r"[^A-Za-z0-9_-]", "_", (p.sku or "").upper())
-        qr_rel_path = f"/uploads/qr/qr_prod_{p.id}_{safe_sku}.png"
-        # La lectura del inventario no debe generar archivos QR en disco.
+        qr_rel_path = f"/api/v1/inventario/{p.id}/qr-image"
         
         return ProductoResponse(
             id=p.id,
