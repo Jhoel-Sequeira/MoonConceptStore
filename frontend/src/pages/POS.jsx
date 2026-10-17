@@ -264,13 +264,12 @@ export default function POSPage() {
       {/* 2. Main Grid: Catálogo (7 cols) + Carrito (5 cols) */}
       <div className="grid grid-cols-12 gap-space-lg items-start">
         {/* Catálogo de Productos */}
-        <div className="col-span-12 lg:col-span-7 flex flex-col gap-4">
+        <div className="order-2 col-span-12 flex flex-col gap-4 lg:order-1 lg:col-span-7">
           <div className="bg-surface-container-lowest p-3 rounded-xl shadow-sm flex flex-col gap-2">
             <div className="flex flex-col gap-2 sm:flex-row">
               <div className="relative min-w-0 flex-1">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">search</span>
                 <input
-                  autoFocus
                   value={searchTerm}
                   onChange={(e) => { setSearchTerm(e.target.value); setScanMessage(''); }}
                   onKeyDown={handleKeyDownSearch}
@@ -283,7 +282,7 @@ export default function POSPage() {
               </button>
             </div>
             {scanMessage && <p role="status" className="px-2 text-xs text-on-surface-variant">{scanMessage}</p>}
-            <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+            <div className="hidden items-center gap-1.5 overflow-x-auto py-1 lg:flex">
               {categories.map((c) => (
                 <button
                   key={c}
@@ -301,15 +300,15 @@ export default function POSPage() {
 
           {/* Grid de Productos */}
           {loading ? (
-            <div className="p-12 text-center text-sm text-on-surface-variant bg-surface-container-lowest rounded-xl shadow-sm">
+            <div className="hidden p-12 text-center text-sm text-on-surface-variant bg-surface-container-lowest rounded-xl shadow-sm lg:block">
               Cargando productos de la base de datos...
             </div>
           ) : filteredCatalog.length === 0 ? (
-            <div className="p-12 text-center text-sm text-on-surface-variant bg-surface-container-lowest rounded-xl shadow-sm">
+            <div className="hidden p-12 text-center text-sm text-on-surface-variant bg-surface-container-lowest rounded-xl shadow-sm lg:block">
               No se encontraron productos disponibles con ese criterio.
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="hidden grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid">
               {filteredCatalog.map((p) => {
                 const stock = p.stock_actual ?? p.stock ?? 0;
                 const sinStock = stock <= 0;
@@ -374,7 +373,7 @@ export default function POSPage() {
         </div>
 
         {/* Carrito de Venta */}
-        <div className="col-span-12 lg:col-span-5 flex flex-col gap-4">
+        <div className="order-1 col-span-12 flex flex-col gap-4 lg:order-2 lg:col-span-5">
           <div className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden flex flex-col">
             <div className="p-4 bg-surface-container-low/50 flex flex-col gap-2 border-b border-surface-container-low">
               <div className="flex items-center justify-between">
