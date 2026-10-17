@@ -22,6 +22,7 @@ function InvoiceBarcode({ value }) {
 const formatInvoiceDate = (value) => new Intl.DateTimeFormat('es-NI', {
   day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
 }).format(new Date(value));
+const normalizeSearch = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 export default function POSPage() {
   const [productos, setProductos] = useState([]);
@@ -29,6 +30,8 @@ export default function POSPage() {
   const [cart, setCart] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('Todo');
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchSuggestionsOpen, setSearchSuggestionsOpen] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [selectedMetodoPago, setSelectedMetodoPago] = useState('Efectivo');
   const [customer, setCustomer] = useState('Consumidor Final');
@@ -119,13 +122,17 @@ export default function POSPage() {
     const cat = p.categoria || marca;
 
     const matchesCat = selectedCategory === 'Todo' || cat === selectedCategory;
+    const normalizedSearch = normalizeSearch(searchTerm);
     const matchesSearch =
-      nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      marca.toLowerCase().includes(searchTerm.toLowerCase());
+      normalizeSearch(nombre).includes(normalizedSearch) ||
+      normalizeSearch(sku).includes(normalizedSearch) ||
+      normalizeSearch(marca).includes(normalizedSearch) ||
+      normalizeSearch(p.codigo_qr).includes(normalizedSearch) ||
+      normalizeSearch(p.descripcion).includes(normalizedSearch);
 
     return matchesCat && matchesSearch;
   });
+  const productSuggestions = searchTerm.trim() ? filteredCatalog.slice(0, 7) : [];
 
   // Agregar al carrito con validación de stock de BD
   const handleAddToCart = (product) => {
@@ -159,6 +166,14 @@ export default function POSPage() {
     return true;
   };
 
+  const addSuggestedProduct = (product) => {
+    const added = handleAddToCart(product);
+    setSearchTerm('');
+    setScanMessage(added ? `${product.nombre} agregado al ticket.` : `${product.nombre} sin existencias disponibles.`);
+    setSearchSuggestionsOpen(false);
+    setSelectedSuggestionIndex(0);
+  };
+
   // Atajo para lector de Código de Barras / QR con tecla Enter
   const processScannedCode = (value) => {
     const code = String(value || '').trim().toLowerCase();
@@ -172,15 +187,39 @@ export default function POSPage() {
       setSearchTerm('');
       setScanMessage(added ? `${match.nombre} agregado al ticket.` : `${match.nombre} sin existencias disponibles.`);
     } else {
-      setScanMessage(`No se encontr? producto para el c?digo "${String(value).trim()}".`);
+      setScanMessage(`No se encontró producto para el código "${String(value).trim()}".`);
       setSearchTerm('');
     }
+    setSearchSuggestionsOpen(false);
+    setSelectedSuggestionIndex(0);
   };
 
   const handleKeyDownSearch = (e) => {
+    if (e.key === 'ArrowDown' && productSuggestions.length) {
+      e.preventDefault();
+      setSearchSuggestionsOpen(true);
+      setSelectedSuggestionIndex((index) => (index + 1) % productSuggestions.length);
+      return;
+    }
+    if (e.key === 'ArrowUp' && productSuggestions.length) {
+      e.preventDefault();
+      setSearchSuggestionsOpen(true);
+      setSelectedSuggestionIndex((index) => (index - 1 + productSuggestions.length) % productSuggestions.length);
+      return;
+    }
+    if (e.key === 'Escape') {
+      setSearchSuggestionsOpen(false);
+      return;
+    }
     if (e.key === 'Enter' && searchTerm.trim() !== '') {
       e.preventDefault();
-      processScannedCode(searchTerm);
+      const exactProduct = productos.find((product) =>
+        normalizeSearch(product.sku) === normalizeSearch(searchTerm.trim()) ||
+        normalizeSearch(product.codigo_qr) === normalizeSearch(searchTerm.trim())
+      );
+      if (exactProduct) processScannedCode(searchTerm);
+      else if (productSuggestions.length) addSuggestedProduct(productSuggestions[selectedSuggestionIndex] || productSuggestions[0]);
+      else processScannedCode(searchTerm);
     }
   };
 
@@ -270,12 +309,45 @@ export default function POSPage() {
               <div className="relative min-w-0 flex-1">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">search</span>
                 <input
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={searchSuggestionsOpen && Boolean(searchTerm.trim())}
                   value={searchTerm}
-                  onChange={(e) => { setSearchTerm(e.target.value); setScanMessage(''); }}
+                  onChange={(e) => { setSearchTerm(e.target.value); setScanMessage(''); setSearchSuggestionsOpen(true); setSelectedSuggestionIndex(0); }}
+                  onFocus={() => setSearchSuggestionsOpen(true)}
+                  onBlur={() => window.setTimeout(() => setSearchSuggestionsOpen(false), 120)}
                   onKeyDown={handleKeyDownSearch}
-                  placeholder="Escanea el QR o escribe el SKU y presiona Enter..."
+                  placeholder="Busca un producto o escanea su QR..."
                   className="w-full h-10 pl-9 pr-4 bg-surface-container-low rounded-lg text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
                 />
+                {searchSuggestionsOpen && searchTerm.trim() && (
+                  <div role="listbox" className="absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto rounded-xl border border-surface-container-high bg-white p-1 shadow-xl">
+                    {productSuggestions.length ? productSuggestions.map((product, index) => {
+                      const stock = product.stock_actual ?? product.stock ?? 0;
+                      return (
+                        <button
+                          key={product.id}
+                          id={`pos-product-suggestion-${product.id}`}
+                          type="button"
+                          role="option"
+                          aria-selected={index === selectedSuggestionIndex}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onMouseEnter={() => setSelectedSuggestionIndex(index)}
+                          onClick={() => addSuggestedProduct(product)}
+                          className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left ${index === selectedSuggestionIndex ? 'bg-surface-container-low' : 'hover:bg-surface-container-low'}`}
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-on-surface">{product.nombre}</span>
+                            <span className="block truncate text-xs text-on-surface-variant">{product.sku || 'Sin SKU'} · {product.marca_nombre || 'General'} · {stock} disponibles</span>
+                          </span>
+                          <span className="shrink-0 text-sm font-semibold text-primary">{formatCordobas(product.precio)}</span>
+                        </button>
+                      );
+                    }) : (
+                      <p className="px-3 py-3 text-sm text-on-surface-variant">No hay productos que coincidan.</p>
+                    )}
+                  </div>
+                )}
               </div>
               <button type="button" onClick={() => setCameraOpen(true)} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-on-primary hover:opacity-90">
                 <span className="material-symbols-outlined text-[18px]">qr_code_scanner</span>Escanear QR
