@@ -12,9 +12,9 @@ import logoDorado from '../imagenes/logoDorado.png';
 
 export const brandConfig = {
   // 1. Identidad de la Marca / Empresa
-  name: "Moon Concept Store",
+  name: "Room Concept Store",
   tagline: "Find Your Style",
-  companyName: "Moon Concept Store",
+  companyName: "Room Concept Store",
   branchName: "Managua",
 
   // 2. Logos e Iconografía

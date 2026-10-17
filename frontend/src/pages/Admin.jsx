@@ -116,7 +116,7 @@ export default function AdminPage() {
   };
 
   const credentialsMessage = credentialsToShare && [
-    `Acceso a Moon Concept Store para ${credentialsToShare.nombre}`,
+    `Acceso a Room Concept Store para ${credentialsToShare.nombre}`,
     `Usuario: ${credentialsToShare.usuario}`,
     `Correo: ${credentialsToShare.email}`,
     `Contraseña: ${credentialsToShare.password}`,
