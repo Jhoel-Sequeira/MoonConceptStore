@@ -13,6 +13,7 @@ const emptyForm = () => ({
   email: '',
   usuario: '',
   password: '',
+  confirmPassword: '',
   rol: 'Cajero / Operador POS',
 });
 
@@ -39,6 +40,8 @@ export default function AdminPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [credentialsToShare, setCredentialsToShare] = useState(null);
+  const [credentialsCopied, setCredentialsCopied] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [form, setForm] = useState(emptyForm);
 
@@ -77,23 +80,30 @@ export default function AdminPage() {
 
   const openEditModal = (user) => {
     setEditingUser(user);
-    setForm({ nombre: user.nombre, email: user.email, usuario: user.usuario, password: '', rol: roles.includes(user.rol) ? user.rol : DEFAULT_ROLES[1] });
+    setForm({ nombre: user.nombre, email: user.email, usuario: user.usuario, password: '', confirmPassword: '', rol: roles.includes(user.rol) ? user.rol : DEFAULT_ROLES[1] });
     setShowModal(true);
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if ((!editingUser || form.password) && form.password !== form.confirmPassword) {
+      setError('Las contraseñas no coinciden. Verifica ambas e inténtalo de nuevo.');
+      return;
+    }
     setSaving(true);
     setError('');
     setNotice('');
     try {
-      const payload = { ...form, nombre: form.nombre.trim(), email: form.email.trim(), usuario: form.usuario.trim() };
+      const { confirmPassword, ...formData } = form;
+      const payload = { ...formData, nombre: form.nombre.trim(), email: form.email.trim(), usuario: form.usuario.trim() };
       if (editingUser) {
         if (!payload.password) delete payload.password;
         await adminService.updateUser(editingUser.id, payload);
         setNotice(`Se actualizaron los datos de ${payload.nombre}.`);
       } else {
         await adminService.createUser(payload);
+        setCredentialsToShare({ nombre: payload.nombre, email: payload.email, usuario: payload.usuario, password: payload.password });
+        setCredentialsCopied(false);
         setNotice(`Se creó el usuario ${payload.nombre}. Comparte sus credenciales de forma segura.`);
       }
       setShowModal(false);
@@ -102,6 +112,24 @@ export default function AdminPage() {
       setError(getErrorMessage(requestError));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const credentialsMessage = credentialsToShare && [
+    `Acceso a Moon Concept Store para ${credentialsToShare.nombre}`,
+    `Usuario: ${credentialsToShare.usuario}`,
+    `Correo: ${credentialsToShare.email}`,
+    `Contraseña: ${credentialsToShare.password}`,
+    'Guarda estas credenciales en un lugar seguro.',
+  ].join('\n');
+
+  const copyCredentials = async () => {
+    try {
+      await navigator.clipboard.writeText(credentialsMessage);
+      setCredentialsCopied(true);
+      setError('');
+    } catch {
+      setError('No se pudo copiar. Selecciona las credenciales y cópialas manualmente.');
     }
   };
 
@@ -214,10 +242,27 @@ export default function AdminPage() {
               <label className="flex flex-col gap-1.5 text-sm font-medium text-on-surface">Correo electrónico<input required type="email" maxLength={255} autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="h-10 rounded-lg bg-surface-container-low px-3 font-normal outline-none focus:ring-1 focus:ring-primary" /></label>
               <label className="flex flex-col gap-1.5 text-sm font-medium text-on-surface">Nombre de usuario<input required minLength={3} maxLength={100} pattern="[A-Za-z0-9._-]+" autoComplete="username" value={form.usuario} onChange={(event) => setForm({ ...form, usuario: event.target.value })} className="h-10 rounded-lg bg-surface-container-low px-3 font-normal outline-none focus:ring-1 focus:ring-primary" /><span className="text-xs font-normal text-on-surface-variant">Usa letras sin tilde, números, punto, guion o guion bajo.</span></label>
               <label className="flex flex-col gap-1.5 text-sm font-medium text-on-surface">Rol<select required value={form.rol} onChange={(event) => setForm({ ...form, rol: event.target.value })} className="h-10 rounded-lg bg-surface-container-low px-3 font-normal outline-none focus:ring-1 focus:ring-primary">{roles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
-              <label className="flex flex-col gap-1.5 text-sm font-medium text-on-surface">{editingUser ? 'Nueva contraseña (opcional)' : 'Contraseña inicial'}<input required={!editingUser} type="password" minLength={8} maxLength={72} autoComplete={editingUser ? 'new-password' : 'new-password'} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} className="h-10 rounded-lg bg-surface-container-low px-3 font-normal outline-none focus:ring-1 focus:ring-primary" /><span className="text-xs font-normal text-on-surface-variant">Mínimo 8 caracteres. Al crear la cuenta, comparte la contraseña de forma segura; este sistema no envía correos de invitación.</span></label>
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-on-surface">{editingUser ? 'Nueva contraseña (opcional)' : 'Contraseña inicial'}<input required={!editingUser} type="password" minLength={8} maxLength={72} autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} className="h-10 rounded-lg bg-surface-container-low px-3 font-normal outline-none focus:ring-1 focus:ring-primary" /><span className="text-xs font-normal text-on-surface-variant">Mínimo 8 caracteres. Si cambias la contraseña, confirma el mismo valor abajo.</span></label>
+              {(!editingUser || form.password) && <label className="flex flex-col gap-1.5 text-sm font-medium text-on-surface">Confirmar contraseña<input required={!editingUser || Boolean(form.password)} type="password" minLength={8} maxLength={72} autoComplete="new-password" value={form.confirmPassword} onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })} className="h-10 rounded-lg bg-surface-container-low px-3 font-normal outline-none focus:ring-1 focus:ring-primary" /></label>}
               {error && <p role="alert" className="rounded-lg bg-error-container/50 p-3 text-sm text-on-surface">{error}</p>}
               <div className="mt-2 flex justify-end gap-2 border-t border-surface-container-low pt-4"><button type="button" disabled={saving} onClick={() => setShowModal(false)} className="rounded-lg px-4 py-2 text-sm font-semibold text-on-surface-variant hover:bg-surface-container-low">Cancelar</button><button type="submit" disabled={saving} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60">{saving && <span className="material-symbols-outlined animate-spin text-[17px]">progress_activity</span>}{saving ? 'Guardando…' : editingUser ? 'Guardar cambios' : 'Crear cuenta'}</button></div>
             </form>
+          </section>
+        </div>
+      )}
+
+      {credentialsToShare && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <section role="dialog" aria-modal="true" aria-labelledby="credentials-title" className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div><h2 id="credentials-title" className="text-lg font-semibold text-on-surface">Usuario creado</h2><p className="mt-1 text-sm text-on-surface-variant">Copia o comparte estas credenciales ahora. La contraseña no se volverá a mostrar.</p></div>
+              <button type="button" onClick={() => setCredentialsToShare(null)} aria-label="Cerrar credenciales" className="rounded-lg p-1.5 text-on-surface-variant hover:bg-surface-container-low"><span className="material-symbols-outlined">close</span></button>
+            </div>
+            <pre className="whitespace-pre-wrap break-words rounded-xl bg-surface-container-low p-4 font-sans text-sm text-on-surface">{credentialsMessage}</pre>
+            <div className="mt-5 flex flex-col justify-end gap-2 sm:flex-row">
+              <button type="button" onClick={copyCredentials} className="rounded-lg border border-outline/30 px-4 py-2 text-sm font-semibold text-primary hover:bg-primary-fixed/30">{credentialsCopied ? 'Credenciales copiadas' : 'Copiar credenciales'}</button>
+              <a href={`https://wa.me/?text=${encodeURIComponent(credentialsMessage)}`} target="_blank" rel="noopener noreferrer" onClick={() => setCredentialsToShare(null)} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary"><span className="material-symbols-outlined text-[18px]">chat</span>Preparar en WhatsApp</a>
+            </div>
           </section>
         </div>
       )}
