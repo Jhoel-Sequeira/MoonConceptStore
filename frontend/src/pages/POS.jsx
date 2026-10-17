@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { BrowserQRCodeReader } from '@zxing/browser';
 import brandConfig from '../brandConfig';
 import inventarioService from '../services/inventarioService';
 import posService from '../services/posService'; // Opcional, si tienes endpoint de venta
@@ -36,7 +37,6 @@ export default function POSPage() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const videoRef = useRef(null);
-  const cameraStreamRef = useRef(null);
   const [invoice, setInvoice] = useState(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
 
@@ -60,62 +60,37 @@ export default function POSPage() {
   useEffect(() => {
     if (!cameraOpen) return undefined;
     let stopped = false;
-    let frameId;
+    let controls;
 
     const stopCamera = () => {
       stopped = true;
-      if (frameId) cancelAnimationFrame(frameId);
-      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
-      cameraStreamRef.current = null;
+      controls?.stop();
     };
 
     const startCamera = async () => {
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-        setCameraError('La c?mara requiere HTTPS. Abre el sistema desde una direcci?n segura para escanear.');
-        return;
-      }
-      if (!('BarcodeDetector' in window)) {
-        setCameraError('Este navegador no admite lectura QR desde la c?mara. Prueba Chrome actualizado o usa un lector QR como teclado.');
+        setCameraError('La cámara requiere HTTPS y permiso para acceder al dispositivo. Abre el sistema desde una dirección segura.');
         return;
       }
 
       try {
-        const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: { ideal: 'environment' } },
-        });
-        if (stopped) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        cameraStreamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-
-        const scanFrame = async () => {
-          if (stopped) return;
-          if (videoRef.current?.readyState >= 2) {
-            try {
-              const codes = await detector.detect(videoRef.current);
-              if (codes.length && codes[0].rawValue) {
-                processScannedCode(codes[0].rawValue);
-                setCameraOpen(false);
-                return;
-              }
-            } catch (error) {
-              console.warn('No se pudo leer el QR en este fotograma:', error);
+        const reader = new BrowserQRCodeReader();
+        const activeControls = await reader.decodeFromVideoDevice(
+          undefined,
+          videoRef.current,
+          (result) => {
+            if (result && !stopped) {
+              processScannedCode(result.getText());
+              setCameraOpen(false);
             }
-          }
-          if (!stopped) frameId = requestAnimationFrame(scanFrame);
-        };
-        frameId = requestAnimationFrame(scanFrame);
+          },
+        );
+        if (stopped) activeControls.stop();
+        else controls = activeControls;
       } catch (error) {
         setCameraError(error.name === 'NotAllowedError'
-          ? 'No se concedi? permiso para usar la c?mara. Habil?talo en el navegador e int?ntalo de nuevo.'
-          : 'No se pudo iniciar la c?mara. Verifica que el dispositivo tenga una c?mara disponible.');
+          ? 'No se concedió permiso para usar la cámara. Habilítalo en el navegador e inténtalo de nuevo.'
+          : 'No se pudo iniciar la cámara. Verifica que el dispositivo tenga una cámara disponible.');
       }
     };
 
