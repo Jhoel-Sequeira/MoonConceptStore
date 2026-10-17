@@ -10,5 +10,6 @@ passlib[bcrypt]
 python-multipart
 qrcode[pil]
 pillow
+openpyxl>=3.1,<4
 python-dotenv
 supabase==2.33.0
