@@ -17,6 +17,9 @@ const navItems = [
 ];
 
 function Sidebar({ user, onLogout, open, onClose }) {
+  const visibleNavItems = navItems.filter((item) =>
+    item.path !== '/admin' || /admin|administrador/i.test(user?.role || '')
+  );
   return (
     <>
       {open && <button type="button" aria-label="Cerrar menú" onClick={onClose} className="fixed inset-0 z-40 bg-[#382E29]/35 md:hidden" />}
@@ -33,7 +36,7 @@ function Sidebar({ user, onLogout, open, onClose }) {
           </div>
 
           <nav aria-label="Navegación principal" className="flex flex-col gap-1">
-            {navItems.map((item) => (
+            {visibleNavItems.map((item) => (
               <NavLink
                 key={item.path}
                 to={item.path}

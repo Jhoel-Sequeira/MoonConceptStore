@@ -1,325 +1,226 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import adminService from '../services/adminService';
+
+const DEFAULT_ROLES = [
+  'Administrador General',
+  'Cajero / Operador POS',
+  'Gestor de Marca',
+  'Auditor de Inventario',
+];
+
+const emptyForm = () => ({
+  nombre: '',
+  email: '',
+  usuario: '',
+  password: '',
+  rol: 'Cajero / Operador POS',
+});
+
+const normalize = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2).map((part) => part[0] || '').join('').toUpperCase();
+
+function getErrorMessage(error) {
+  const detail = error.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) return detail.map((item) => item.msg).join('. ');
+  return 'No se pudo completar la operación. Inténtalo de nuevo.';
+}
 
 export default function AdminPage() {
-  const [showModal, setShowModal] = useState(false);
+  const [users, setUsers] = useState([]);
+  const [roles, setRoles] = useState(DEFAULT_ROLES);
+  const [activeCount, setActiveCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
-  const [activeTab, setActiveTab] = useState('usuarios');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+  const [form, setForm] = useState(emptyForm);
 
-  const users = [
-    { initials: 'CR', name: 'Camila Rodríguez', id: 'USR-00109', detail: 'Caja #1', email: 'camila.rodriguez@brandhub.com', role: 'Cajero Principal', roleIcon: 'point_of_sale', roleBg: 'bg-primary-fixed/50 text-on-primary-fixed-variant', branch: 'Sucursal Principal', branchIcon: 'storefront', branchIconColor: 'text-primary', lastAccess: 'En línea ahora', lastAccessOnline: true, status: 'Activo', statusActive: true, avatarBg: 'bg-primary-fixed text-on-primary-fixed', online: true },
-    { initials: 'MA', name: 'Martín Arismendi', id: 'USR-00001', detail: 'SuperAdmin', email: 'martin.a@brandhub.com', role: 'Administrador General', roleIcon: 'shield_person', roleBg: 'bg-surface-container-highest text-primary font-semibold', branch: 'Todas las Sucursales (3)', branchType: 'pill', lastAccess: 'Hace 2 horas', lastAccessOnline: false, status: 'Activo', statusActive: true, avatarBg: 'bg-surface-container-high text-primary' },
-    { initials: 'EM', name: 'Elena Müller', id: 'USR-00442', detail: 'Nordic Home', email: 'elena@nordichome.design', role: 'Gestor de Marca (Nordic Home)', roleIcon: 'store', roleIconColor: 'text-tertiary', roleBg: 'bg-surface-container text-on-surface-variant', branch: 'Portal Proveedor', branchType: 'portal', lastAccess: 'Hace 1 día', lastAccessOnline: false, status: 'Activo', statusActive: true, avatarBg: 'bg-tertiary-fixed text-on-tertiary-fixed' },
-    { initials: 'LV', name: 'Lucas Vera', id: 'USR-00448', detail: 'Vera Studio', email: 'lucas@verastudio.ar', role: 'Gestor de Marca (Vera Studio)', roleIcon: 'store', roleIconColor: 'text-tertiary', roleBg: 'bg-surface-container text-on-surface-variant', branch: 'Portal Proveedor', branchType: 'portal', lastAccess: 'Hace 3 días', lastAccessOnline: false, status: 'Activo', statusActive: true, avatarBg: 'bg-surface-container-high text-on-surface-variant' },
-    { initials: 'DF', name: 'Diego Fernández', id: 'USR-00214', detail: 'Turno Tarde', email: 'd.fernandez@brandhub.com', role: 'Cajero Suplente', roleIcon: 'schedule', roleBg: 'bg-surface-container-low text-on-surface-variant', branch: 'Sucursal Principal', branchIcon: 'storefront', lastAccess: '08 Oct 2024', lastAccessOnline: false, status: 'En Pausa', statusActive: false, avatarBg: 'bg-surface-container-high/60 text-outline', opacity: true },
-  ];
+  const loadUsers = useCallback(async (showLoader = true) => {
+    if (showLoader) setLoading(true);
+    try {
+      const result = await adminService.listUsers();
+      setUsers(result.users || []);
+      setRoles([...new Set([...(result.roles?.length ? result.roles : DEFAULT_ROLES), ...(result.users || []).map((user) => user.rol)])]);
+      setActiveCount(result.active || 0);
+      setTotalCount(result.total || 0);
+      setError('');
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const filteredUsers = users.filter(user => {
-    const text = `${user.name} ${user.email} ${user.role}`.toLowerCase();
-    const matchesQuery = text.includes(searchQuery.toLowerCase());
-    let matchesRole = true;
-    if (roleFilter === 'admin') matchesRole = text.includes('administrador');
-    if (roleFilter === 'cashier') matchesRole = text.includes('cajero');
-    if (roleFilter === 'brand') matchesRole = text.includes('gestor de marca');
-    return matchesQuery && matchesRole;
-  });
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
+
+  const filteredUsers = useMemo(() => users.filter((user) => {
+    const queryMatch = normalize(`${user.nombre} ${user.email} ${user.usuario} ${user.rol}`).includes(normalize(searchQuery));
+    const roleMatch = roleFilter === 'all' || user.rol === roleFilter;
+    const statusMatch = statusFilter === 'all' || (statusFilter === 'active' ? user.estado === 'Activo' : user.estado !== 'Activo');
+    return queryMatch && roleMatch && statusMatch;
+  }), [users, searchQuery, roleFilter, statusFilter]);
+
+  const openCreateModal = () => {
+    setEditingUser(null);
+    setForm(emptyForm());
+    setShowModal(true);
+  };
+
+  const openEditModal = (user) => {
+    setEditingUser(user);
+    setForm({ nombre: user.nombre, email: user.email, usuario: user.usuario, password: '', rol: roles.includes(user.rol) ? user.rol : DEFAULT_ROLES[1] });
+    setShowModal(true);
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      const payload = { ...form, nombre: form.nombre.trim(), email: form.email.trim(), usuario: form.usuario.trim() };
+      if (editingUser) {
+        if (!payload.password) delete payload.password;
+        await adminService.updateUser(editingUser.id, payload);
+        setNotice(`Se actualizaron los datos de ${payload.nombre}.`);
+      } else {
+        await adminService.createUser(payload);
+        setNotice(`Se creó el usuario ${payload.nombre}. Comparte sus credenciales de forma segura.`);
+      }
+      setShowModal(false);
+      await loadUsers(false);
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleUserStatus = async (user) => {
+    const activate = user.estado !== 'Activo';
+    if (!activate && !window.confirm(`¿Desactivar la cuenta de ${user.nombre}? Ya no podrá iniciar sesión.`)) return;
+    setError('');
+    setNotice('');
+    try {
+      await adminService.setUserActive(user.id, activate);
+      setNotice(activate ? `Se activó la cuenta de ${user.nombre}.` : `Se desactivó la cuenta de ${user.nombre}.`);
+      await loadUsers(false);
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    }
+  };
 
   return (
-    <div className="flex flex-col w-full">
-      <div className="flex flex-col gap-6">
-        {/* Header Section */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-2">
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2 text-primary font-label-sm text-label-sm uppercase tracking-wider">
-              <span className="material-symbols-outlined text-[16px]">admin_panel_settings</span>
-              <span>Panel de Control & Seguridad</span>
-            </div>
-            <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight">Administración del Sistema</h1>
-            <p className="font-body-md text-body-md text-on-surface-variant max-w-2xl">
-              Configuración global de usuarios, roles de seguridad, datos de sucursal e impuestos para tiendas multimarca.
-            </p>
+    <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6">
+      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-primary">
+            <span className="material-symbols-outlined text-[18px]">admin_panel_settings</span>
+            <span>Administración del sistema</span>
           </div>
-          {/* Quick Metrics Strip */}
-          <div className="flex items-center gap-3 bg-surface-container-lowest px-4 py-2.5 rounded-xl shadow-sm">
-            <div className="flex items-center gap-2.5 pr-4 border-r border-surface-container-high/60">
-              <div className="w-8 h-8 rounded-lg bg-primary-fixed/40 flex items-center justify-center text-primary">
-                <span className="material-symbols-outlined text-[18px]">verified_user</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="font-label-sm text-label-sm text-on-surface-variant">Usuarios Activos</span>
-                <span className="font-headline-sm text-headline-sm text-on-surface leading-tight">18 / 20</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 pl-1 text-secondary font-label-md text-label-md">
-              <span className="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
-              <span>2FA Obligatorio</span>
-            </div>
-          </div>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-on-surface sm:text-3xl">Usuarios y permisos</h1>
+          <p className="mt-1 text-sm text-on-surface-variant">Crea cuentas, asigna roles y controla el acceso al sistema.</p>
         </div>
+        <button type="button" onClick={openCreateModal} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-on-primary shadow-sm hover:opacity-95">
+          <span className="material-symbols-outlined text-[18px]">person_add</span>
+          Crear usuario
+        </button>
+      </header>
 
-        {/* Navigation Tabs */}
-        <div className="flex items-center justify-between border-b border-surface-container-high/80">
-          <div className="flex items-center gap-2 -mb-px">
-            <button onClick={() => setActiveTab('usuarios')} className={`group flex items-center gap-2 py-3 px-4 font-label-md text-label-md transition-all ${activeTab === 'usuarios' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant hover:text-on-surface hover:border-b-2 hover:border-outline-variant/60'}`} type="button">
-              <span className="material-symbols-outlined text-[18px]" style={activeTab === 'usuarios' ? { fontVariationSettings: "'FILL' 1" } : {}}>manage_accounts</span>
-              <span>Usuarios y Roles</span>
-              <span className="px-1.5 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed-variant font-label-sm text-label-sm ml-1">5</span>
-            </button>
-            <button onClick={() => setActiveTab('sucursal')} className={`group flex items-center gap-2 py-3 px-4 font-label-md text-label-md transition-all ${activeTab === 'sucursal' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant hover:text-on-surface hover:border-b-2 hover:border-outline-variant/60'}`} type="button">
-              <span className="material-symbols-outlined text-[18px]">store</span>
-              <span>Datos de Sucursal</span>
-            </button>
-            <button onClick={() => setActiveTab('config')} className={`group flex items-center gap-2 py-3 px-4 font-label-md text-label-md transition-all ${activeTab === 'config' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant hover:text-on-surface hover:border-b-2 hover:border-outline-variant/60'}`} type="button">
-              <span className="material-symbols-outlined text-[18px]">tune</span>
-              <span>Configuración General e Impuestos</span>
-            </button>
-          </div>
-          <div className="hidden lg:flex items-center gap-2 text-on-surface-variant font-body-sm text-body-sm">
-            <span className="material-symbols-outlined text-[16px]">sync</span>
-            <span>Sincronizado con BrandHub Cloud</span>
-          </div>
+      {error && <div role="alert" className="flex items-start justify-between gap-3 rounded-xl border border-error/20 bg-error-container/40 px-4 py-3 text-sm text-on-surface"><span>{error}</span><button type="button" onClick={() => loadUsers()} className="shrink-0 font-semibold text-primary hover:underline">Reintentar</button></div>}
+      {notice && <div role="status" className="flex items-center justify-between gap-3 rounded-xl border border-secondary/20 bg-secondary-fixed/30 px-4 py-3 text-sm text-on-surface"><span>{notice}</span><button type="button" aria-label="Cerrar mensaje" onClick={() => setNotice('')} className="material-symbols-outlined text-[18px]">close</button></div>}
+
+      <section aria-label="Resumen de usuarios" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <article className="flex items-center gap-3 rounded-2xl border border-primary-fixed-dim/25 bg-white p-4 shadow-sm">
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-primary-fixed text-primary"><span className="material-symbols-outlined">group</span></span>
+          <div><p className="text-sm text-on-surface-variant">Cuentas registradas</p><p className="text-2xl font-semibold text-on-surface">{loading ? '—' : totalCount}</p></div>
+        </article>
+        <article className="flex items-center gap-3 rounded-2xl border border-primary-fixed-dim/25 bg-white p-4 shadow-sm">
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-secondary-fixed/50 text-secondary"><span className="material-symbols-outlined">verified_user</span></span>
+          <div><p className="text-sm text-on-surface-variant">Cuentas activas</p><p className="text-2xl font-semibold text-on-surface">{loading ? '—' : activeCount}</p></div>
+        </article>
+      </section>
+
+      <section className="flex flex-col gap-3 rounded-xl bg-white p-3.5 shadow-sm sm:flex-row sm:items-center">
+        <label className="relative min-w-0 flex-1">
+          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-outline">search</span>
+          <input aria-label="Buscar usuarios" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Buscar por nombre, usuario, correo o rol" className="h-10 w-full rounded-lg bg-surface-container-low pl-9 pr-3 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary" />
+        </label>
+        <select aria-label="Filtrar por rol" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} className="h-10 rounded-lg bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary">
+          <option value="all">Todos los roles</option>
+          {roles.map((role) => <option key={role} value={role}>{role}</option>)}
+        </select>
+        <select aria-label="Filtrar por estado" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-10 rounded-lg bg-surface-container-low px-3 text-sm text-on-surface outline-none focus:ring-1 focus:ring-primary">
+          <option value="all">Todos los estados</option>
+          <option value="active">Activos</option>
+          <option value="inactive">Inactivos</option>
+        </select>
+        <button type="button" onClick={() => loadUsers()} disabled={loading} title="Actualizar lista" aria-label="Actualizar lista" className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-surface-container-low text-primary hover:bg-surface-container disabled:opacity-50"><span className={`material-symbols-outlined ${loading ? 'animate-spin' : ''}`}>refresh</span></button>
+      </section>
+
+      <section className="overflow-hidden rounded-xl bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-surface-container-low px-4 py-3">
+          <h2 className="font-semibold text-on-surface">Cuentas de usuario</h2>
+          <span className="text-sm text-on-surface-variant">{filteredUsers.length} resultados</span>
         </div>
-
-        {/* Filter Toolbar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-surface-container-lowest p-3.5 rounded-xl shadow-sm">
-          <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-2xl">
-            <div className="relative flex-1 min-w-[220px]">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">person_search</span>
-              <input className="w-full h-9 pl-9 pr-3 bg-surface-container-low rounded-lg text-on-surface placeholder:text-on-surface-variant font-body-sm text-body-sm focus:outline-none focus:ring-1 focus:ring-primary transition-all" placeholder="Buscar por nombre, email o marca..." type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-            </div>
-            <div className="relative min-w-[190px]">
-              <select className="w-full h-9 appearance-none pl-3 pr-8 bg-surface-container-low rounded-lg text-on-surface font-label-md text-label-md focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer transition-all" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
-                <option value="all">Todos los roles (5)</option>
-                <option value="admin">Administrador General</option>
-                <option value="cashier">Cajero / Operador</option>
-                <option value="brand">Gestor de Marca</option>
-              </select>
-              <span className="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none text-[18px]">unfold_more</span>
-            </div>
-            <button className="h-9 px-3 bg-surface-container-low hover:bg-surface-container rounded-lg flex items-center gap-1.5 text-on-surface-variant hover:text-on-surface font-label-sm text-label-sm transition-colors" type="button">
-              <span className="material-symbols-outlined text-[16px]">filter_list</span>
-              <span>Filtros avanzados</span>
-            </button>
-          </div>
-          <button className="h-9 px-4 bg-primary text-on-primary rounded-lg font-label-md text-label-md flex items-center justify-center gap-1.5 shadow-sm hover:opacity-95 active:scale-[0.98] transition-all whitespace-nowrap" type="button" onClick={() => setShowModal(true)}>
-            <span className="material-symbols-outlined text-[18px]">person_add</span>
-            <span>+ Invitar Nuevo Usuario</span>
-          </button>
-        </div>
-
-        {/* Users Table */}
-        <div className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+        {loading ? (
+          <p className="p-10 text-center text-sm text-on-surface-variant">Cargando usuarios…</p>
+        ) : filteredUsers.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-surface-container-low text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider">
-                  <th className="py-3 px-4" scope="col">Usuario</th>
-                  <th className="py-3 px-4" scope="col">Email</th>
-                  <th className="py-3 px-4" scope="col">Rol Asignado</th>
-                  <th className="py-3 px-4" scope="col">Sucursal Asignada</th>
-                  <th className="py-3 px-4" scope="col">Último Acceso</th>
-                  <th className="py-3 px-4" scope="col">Estado</th>
-                  <th className="py-3 px-4 text-right" scope="col">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-container-high/60 font-body-md text-body-md text-on-surface">
-                {filteredUsers.map((user) => (
-                  <tr key={user.id} className={`hover:bg-surface-container-low/60 transition-colors group ${user.opacity ? 'opacity-85' : ''}`}>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <div className="flex items-center gap-3">
-                        <div className={`relative w-9 h-9 rounded-full ${user.avatarBg} flex items-center justify-center font-label-md text-label-md`}>
-                          {user.initials}
-                          {user.online && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-secondary ring-2 ring-surface-container-lowest"></span>}
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="font-label-md text-label-md text-on-surface group-hover:text-primary transition-colors">{user.name}</span>
-                          <span className="font-body-sm text-body-sm text-on-surface-variant">ID: {user.id} · {user.detail}</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 font-body-sm text-body-sm text-on-surface-variant whitespace-nowrap">{user.email}</td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full ${user.roleBg} font-label-sm text-label-sm`}>
-                        <span className={`material-symbols-outlined text-[14px] ${user.roleIconColor || ''}`}>{user.roleIcon}</span>
-                        {user.role}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 font-body-sm text-body-sm whitespace-nowrap">
-                      {user.branchType === 'pill' ? (
-                        <span className="px-2 py-0.5 bg-surface-container-low rounded text-on-surface-variant font-label-sm text-label-sm">{user.branch}</span>
-                      ) : user.branchType === 'portal' ? (
-                        <span className="inline-flex items-center gap-1 text-tertiary font-label-sm text-label-sm">
-                          <span className="material-symbols-outlined text-[14px]">captive_portal</span>
-                          {user.branch}
-                        </span>
-                      ) : (
-                        <div className="flex items-center gap-1.5 text-on-surface">
-                          <span className={`material-symbols-outlined text-[16px] ${user.branchIconColor || ''}`}>{user.branchIcon}</span>
-                          <span>{user.branch}</span>
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      {user.lastAccessOnline ? (
-                        <span className="inline-flex items-center gap-1.5 font-label-sm text-label-sm text-secondary font-medium">
-                          <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-ping"></span>
-                          En línea ahora
-                        </span>
-                      ) : (
-                        <span className="font-body-sm text-body-sm text-on-surface-variant">{user.lastAccess}</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-label-sm text-label-sm font-semibold ${user.statusActive ? 'bg-secondary-fixed/50 text-on-secondary-fixed-variant' : 'bg-surface-container-high text-on-surface-variant'}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${user.statusActive ? 'bg-secondary' : 'bg-outline'}`}></span>
-                        {user.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right whitespace-nowrap">
-                      <div className="inline-flex items-center gap-1">
-                        {user.statusActive ? (
-                          <button className="px-2.5 py-1 text-primary hover:bg-surface-container font-label-sm text-label-sm rounded transition-colors" type="button">Editar Permisos</button>
-                        ) : (
-                          <button className="px-2.5 py-1 text-secondary hover:bg-secondary-fixed/30 font-label-sm text-label-sm rounded transition-colors font-semibold" type="button">Reactivar</button>
-                        )}
-                        <button className="w-8 h-8 rounded flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors" title="Más opciones" type="button">
-                          <span className="material-symbols-outlined text-[18px]">more_vert</span>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+            <table className="w-full min-w-[760px] text-left">
+              <thead><tr className="bg-surface-container-low text-xs uppercase tracking-wide text-on-surface-variant"><th scope="col" className="px-4 py-3">Usuario</th><th scope="col" className="px-4 py-3">Correo</th><th scope="col" className="px-4 py-3">Rol</th><th scope="col" className="px-4 py-3">Estado</th><th scope="col" className="px-4 py-3">Creado</th><th scope="col" className="px-4 py-3 text-right">Acciones</th></tr></thead>
+              <tbody className="divide-y divide-surface-container-low text-sm">
+                {filteredUsers.map((user) => {
+                  const active = user.estado === 'Activo';
+                  const created = user.creado_en ? new Intl.DateTimeFormat('es-NI', { dateStyle: 'medium' }).format(new Date(user.creado_en)) : '—';
+                  return (
+                    <tr key={user.id} className="hover:bg-surface-container-low/40">
+                      <td className="px-4 py-3"><div className="flex items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary-fixed text-xs font-semibold text-primary">{initials(user.nombre)}</span><span className="min-w-0"><span className="block truncate font-semibold text-on-surface">{user.nombre}</span><span className="block text-xs text-on-surface-variant">@{user.usuario}</span></span></div></td>
+                      <td className="px-4 py-3 text-on-surface-variant">{user.email}</td>
+                      <td className="px-4 py-3"><span className="rounded-full bg-surface-container-low px-2.5 py-1 text-xs font-medium text-on-surface">{user.rol}</span></td>
+                      <td className="px-4 py-3"><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${active ? 'bg-secondary-fixed/50 text-on-secondary-fixed-variant' : 'bg-surface-container-high text-on-surface-variant'}`}><span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-secondary' : 'bg-outline'}`} />{user.estado}</span></td>
+                      <td className="px-4 py-3 text-on-surface-variant">{created}</td>
+                      <td className="px-4 py-3 text-right"><div className="inline-flex items-center gap-1"><button type="button" onClick={() => openEditModal(user)} className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary-fixed/40">Editar</button><button type="button" onClick={() => toggleUserStatus(user)} className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${active ? 'text-error hover:bg-error-container/40' : 'text-secondary hover:bg-secondary-fixed/40'}`}>{active ? 'Desactivar' : 'Activar'}</button></div></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
+        ) : (
+          <p className="p-10 text-center text-sm text-on-surface-variant">No hay usuarios que coincidan con esos filtros.</p>
+        )}
+        <div className="border-t border-surface-container-low bg-surface-container-low/50 px-4 py-3 text-xs text-on-surface-variant">Las cuentas desactivadas no pueden iniciar sesión. El sistema conserva sus datos para mantener el historial.</div>
+      </section>
 
-          {/* Pagination */}
-          <div className="px-4 py-3 bg-surface-container-low flex flex-col sm:flex-row items-center justify-between gap-3 text-on-surface-variant font-body-sm text-body-sm">
-            <div className="flex items-center gap-2">
-              <span>Mostrando {filteredUsers.length} de 18 usuarios registrados</span>
-              <span className="text-outline-variant">•</span>
-              <button className="text-primary hover:underline font-label-sm text-label-sm" type="button">Exportar listado (CSV)</button>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <button className="px-2.5 py-1 rounded bg-surface-container-lowest text-on-surface-variant hover:text-on-surface hover:bg-surface-container font-label-sm text-label-sm transition-colors disabled:opacity-40" disabled type="button">Anterior</button>
-              <span className="px-2 py-0.5 font-label-sm text-label-sm bg-primary text-on-primary rounded">1</span>
-              <button className="px-2 py-0.5 font-label-sm text-label-sm hover:bg-surface-container rounded text-on-surface-variant" type="button">2</button>
-              <button className="px-2.5 py-1 rounded bg-surface-container-lowest text-on-surface hover:bg-surface-container font-label-sm text-label-sm transition-colors" type="button">Siguiente</button>
-            </div>
-          </div>
-        </div>
-
-        {/* Security & Brand Isolation Info Card */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 bg-surface-container-lowest rounded-xl p-6 shadow-sm relative overflow-hidden">
-          <div className="absolute -right-12 -bottom-12 w-64 h-64 rounded-full bg-gradient-to-br from-primary/5 via-secondary/10 to-transparent pointer-events-none"></div>
-          <div className="lg:col-span-4 flex flex-col justify-between gap-4">
-            <div className="flex flex-col gap-2">
-              <div className="w-10 h-10 rounded-lg bg-primary-fixed flex items-center justify-center text-primary">
-                <span className="material-symbols-outlined text-[24px]">verified_user</span>
-              </div>
-              <h2 className="font-headline-sm text-headline-sm text-on-surface">Resumen de Niveles de Permiso y Seguridad</h2>
-              <p className="font-body-md text-body-md text-on-surface-variant">
-                BrandHub POS implementa una arquitectura estricta de <span className="font-semibold text-on-surface">Aislamiento Multitenant por Marca</span>. Cada proveedor opera en un contenedor virtual seguro.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 text-primary font-label-md text-label-md cursor-pointer hover:underline">
-              <span>Ver matriz de permisos completa</span>
-              <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-            </div>
-          </div>
-          <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <RoleCard title="Super Admin" icon="security" iconColor="text-primary" desc="Acceso irrestricto a todas las marcas, cajas, recaudación global, configuraciones fiscales y conciliaciones bancarias." footerIcon="check_circle" footerText="Auditoría completa" footerColor="text-secondary" />
-            <RoleCard title="Cajero / Operador" icon="point_of_sale" iconColor="text-primary" desc="Operación de terminal POS, escaneo de tickets y cobro múltiple. Sin visibilidad de costos de adquisición ni márgenes de marca." footerIcon="lock" footerText="Cierre por turno" footerColor="text-on-surface-variant" />
-            <RoleCard title="Gestor de Marca" icon="loyalty" iconColor="text-tertiary" desc="Acceso aislado únicamente a su catálogo, stock y reportes de liquidación. Cero acceso a datos de otras marcas del local." footerIcon="verified" footerText="Aislamiento 100% estricto" footerColor="text-secondary" />
-          </div>
-        </div>
-      </div>
-
-      {/* Invite User Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-inverse-surface/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false); }}>
-          <div className="bg-surface-container-lowest w-full max-w-lg rounded-2xl shadow-xl p-6 flex flex-col gap-5">
-            <div className="flex items-center justify-between pb-3 border-b border-surface-container-high/60">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-primary-fixed flex items-center justify-center text-primary">
-                  <span className="material-symbols-outlined text-[20px]">person_add</span>
-                </div>
-                <div>
-                  <h3 className="font-headline-sm text-headline-sm text-on-surface">Invitar Nuevo Usuario</h3>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant">Configura las credenciales y el nivel de acceso</p>
-                </div>
-              </div>
-              <button className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg hover:bg-surface-container transition-colors" onClick={() => setShowModal(false)} type="button">
-                <span className="material-symbols-outlined text-[20px]">close</span>
-              </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowModal(false); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="user-form-title" className="max-h-[95vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
+            <div className="mb-5 flex items-start justify-between gap-4 border-b border-surface-container-low pb-4">
+              <div><h2 id="user-form-title" className="text-lg font-semibold text-on-surface">{editingUser ? 'Editar usuario' : 'Crear usuario'}</h2><p className="mt-1 text-sm text-on-surface-variant">Configura sus datos de acceso y el rol del sistema.</p></div>
+              <button type="button" onClick={() => setShowModal(false)} aria-label="Cerrar formulario" className="rounded-lg p-1.5 text-on-surface-variant hover:bg-surface-container-low"><span className="material-symbols-outlined">close</span></button>
             </div>
-            <form className="flex flex-col gap-4" onSubmit={(e) => e.preventDefault()}>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <label className="font-label-sm text-label-sm text-on-surface font-medium">Nombre</label>
-                  <input className="h-9 px-3 bg-surface-container-low rounded-lg text-on-surface font-body-sm text-body-sm focus:outline-none focus:ring-1 focus:ring-primary" placeholder="Ej. Sofía" type="text" />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="font-label-sm text-label-sm text-on-surface font-medium">Apellido</label>
-                  <input className="h-9 px-3 bg-surface-container-low rounded-lg text-on-surface font-body-sm text-body-sm focus:outline-none focus:ring-1 focus:ring-primary" placeholder="Ej. Valenzuela" type="text" />
-                </div>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="font-label-sm text-label-sm text-on-surface font-medium">Correo Electrónico Corporativo</label>
-                <input className="h-9 px-3 bg-surface-container-low rounded-lg text-on-surface font-body-sm text-body-sm focus:outline-none focus:ring-1 focus:ring-primary" placeholder="usuario@empresa.com" type="email" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <label className="font-label-sm text-label-sm text-on-surface font-medium">Rol de Usuario</label>
-                  <select className="h-9 px-3 bg-surface-container-low rounded-lg text-on-surface font-body-sm text-body-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                    <option>Cajero / Operador POS</option>
-                    <option>Administrador General</option>
-                    <option>Gestor de Marca</option>
-                    <option>Auditor de Inventario</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="font-label-sm text-label-sm text-on-surface font-medium">Sucursal Asignada</label>
-                  <select className="h-9 px-3 bg-surface-container-low rounded-lg text-on-surface font-body-sm text-body-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                    <option>Sucursal Principal (Palermo)</option>
-                    <option>Sucursal Norte (Martínez)</option>
-                    <option>Todas las sucursales</option>
-                    <option>Portal Proveedor</option>
-                  </select>
-                </div>
-              </div>
-              <div className="p-3 bg-surface-container-low rounded-lg flex items-start gap-2.5">
-                <span className="material-symbols-outlined text-primary text-[18px] mt-0.5">info</span>
-                <p className="font-body-sm text-body-sm text-on-surface-variant">
-                  Se enviará una invitación por correo con enlace temporal seguro para la creación de contraseña y activación de doble factor (2FA).
-                </p>
-              </div>
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-surface-container-high/60">
-                <button className="px-4 py-2 rounded-lg font-label-md text-label-md text-on-surface-variant hover:bg-surface-container transition-colors" onClick={() => setShowModal(false)} type="button">Cancelar</button>
-                <button className="px-4 py-2 bg-primary text-on-primary rounded-lg font-label-md text-label-md hover:opacity-95 transition-all shadow-sm" type="button" onClick={() => setShowModal(false)}>Enviar Invitación</button>
-              </div>
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-on-surface">Nombre completo<input required minLength={2} maxLength={255} autoComplete="name" value={form.nombre} onChange={(event) => setForm({ ...form, nombre: event.target.value })} className="h-10 rounded-lg bg-surface-container-low px-3 font-normal outline-none focus:ring-1 focus:ring-primary" /></label>
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-on-surface">Correo electrónico<input required type="email" maxLength={255} autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="h-10 rounded-lg bg-surface-container-low px-3 font-normal outline-none focus:ring-1 focus:ring-primary" /></label>
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-on-surface">Nombre de usuario<input required minLength={3} maxLength={100} pattern="[A-Za-z0-9._-]+" autoComplete="username" value={form.usuario} onChange={(event) => setForm({ ...form, usuario: event.target.value })} className="h-10 rounded-lg bg-surface-container-low px-3 font-normal outline-none focus:ring-1 focus:ring-primary" /><span className="text-xs font-normal text-on-surface-variant">Usa letras sin tilde, números, punto, guion o guion bajo.</span></label>
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-on-surface">Rol<select required value={form.rol} onChange={(event) => setForm({ ...form, rol: event.target.value })} className="h-10 rounded-lg bg-surface-container-low px-3 font-normal outline-none focus:ring-1 focus:ring-primary">{roles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-on-surface">{editingUser ? 'Nueva contraseña (opcional)' : 'Contraseña inicial'}<input required={!editingUser} type="password" minLength={8} maxLength={72} autoComplete={editingUser ? 'new-password' : 'new-password'} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} className="h-10 rounded-lg bg-surface-container-low px-3 font-normal outline-none focus:ring-1 focus:ring-primary" /><span className="text-xs font-normal text-on-surface-variant">Mínimo 8 caracteres. Al crear la cuenta, comparte la contraseña de forma segura; este sistema no envía correos de invitación.</span></label>
+              {error && <p role="alert" className="rounded-lg bg-error-container/50 p-3 text-sm text-on-surface">{error}</p>}
+              <div className="mt-2 flex justify-end gap-2 border-t border-surface-container-low pt-4"><button type="button" disabled={saving} onClick={() => setShowModal(false)} className="rounded-lg px-4 py-2 text-sm font-semibold text-on-surface-variant hover:bg-surface-container-low">Cancelar</button><button type="submit" disabled={saving} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60">{saving && <span className="material-symbols-outlined animate-spin text-[17px]">progress_activity</span>}{saving ? 'Guardando…' : editingUser ? 'Guardar cambios' : 'Crear cuenta'}</button></div>
             </form>
-          </div>
+          </section>
         </div>
       )}
-    </div>
-  );
-}
-
-function RoleCard({ title, icon, iconColor, desc, footerIcon, footerText, footerColor }) {
-  return (
-    <div className="p-4 rounded-xl bg-surface-container-low/70 flex flex-col justify-between gap-3 hover:bg-surface-container-low transition-colors">
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between">
-          <span className="font-label-md text-label-md text-on-surface">{title}</span>
-          <span className={`material-symbols-outlined ${iconColor} text-[18px]`}>{icon}</span>
-        </div>
-        <p className="font-body-sm text-body-sm text-on-surface-variant">{desc}</p>
-      </div>
-      <div className={`pt-2 border-t border-surface-container-high/60 flex items-center gap-1.5 font-label-sm text-label-sm ${footerColor}`}>
-        <span className="material-symbols-outlined text-[14px]">{footerIcon}</span>
-        <span>{footerText}</span>
-      </div>
     </div>
   );
 }

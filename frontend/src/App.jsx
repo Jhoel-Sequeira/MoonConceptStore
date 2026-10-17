@@ -15,6 +15,8 @@ import LiquidacionesPage from './pages/Liquidaciones';
 import RentaPage from './pages/Renta';
 import api from './services/api';
 
+const canManageUsers = (user) => /admin|administrador/i.test(user?.role || '');
+
 export default function App() {
   const [user, setUser] = useState(() => {
     try {
@@ -53,7 +55,7 @@ export default function App() {
           <Layout user={user} onLogout={handleLogout}>
             <Routes>
               <Route path="/" element={<DashboardPage user={user} />} />
-              <Route path="/admin" element={<AdminPage />} />
+              <Route path="/admin" element={canManageUsers(user) ? <AdminPage /> : <Navigate to="/" replace />} />
               <Route path="/marcas" element={<MarcasPage />} />
               <Route path="/clientes" element={<ClientesPage />} />
               <Route path="/inventario" element={<InventarioPage />} />
