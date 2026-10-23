@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
 from decimal import Decimal
 
@@ -13,6 +13,7 @@ class ProductoBase(BaseModel):
     stock_critico: Optional[int] = Field(default=5, ge=0, le=2147483647)
     imagen_url: Optional[str] = Field(default=None, max_length=2000)
     imagenes: List[str] = Field(default_factory=list, max_length=10)
+    detalles_rubro: Dict[str, str] = Field(default_factory=dict)
     estado_id: Optional[int] = 1
 
 class ProductoCreate(ProductoBase):
@@ -28,6 +29,7 @@ class ProductoUpdate(BaseModel):
     stock_critico: Optional[int] = Field(default=None, ge=0, le=2147483647)
     imagen_url: Optional[str] = Field(default=None, max_length=2000)
     imagenes: Optional[List[str]] = Field(default=None, max_length=10)
+    detalles_rubro: Optional[Dict[str, str]] = None
     estado_id: Optional[int] = None
     stock_actual: Optional[int] = Field(default=None, ge=0, le=2147483647)
 
@@ -46,6 +48,8 @@ class ProductoResponse(BaseModel):
     qr_image_url: Optional[str] = None
     marca_id: int
     marca_nombre: Optional[str] = None
+    categoria: str = "ROPA VARIADA"
+    detalles_rubro: Dict[str, str] = Field(default_factory=dict)
     marca_codigo: Optional[str] = None
     stock_actual: int = 0
     qr_status: str = "Generado"

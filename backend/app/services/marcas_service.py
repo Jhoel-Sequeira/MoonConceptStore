@@ -11,12 +11,13 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.drawing.image import Image as OpenpyxlImage
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageDraw, ImageFont
 from app.models.marcas import Marca, Cuenta
 from app.models.inventario import Kardex, Producto
 from app.models.ingresos import Ingreso, IngresoDetalle
 from app.schemas.marcas import MarcaCreate, MarcaUpdate
 from app.core.storage import download_image
+from app.core.categories import normalize_category
 
 class MarcasService:
     @staticmethod
@@ -132,7 +133,7 @@ class MarcasService:
             nombre_marca=marca_in.nombre_marca,
             cedula=marca_in.cedula,
             codigo=marca_in.codigo or (marca_in.nombre_marca[:3].upper() if marca_in.nombre_marca else "MC"),
-            categoria=marca_in.categoria,
+            categoria=normalize_category(marca_in.categoria),
             razon_social=marca_in.razon_social,
             ciudad_pais=marca_in.ciudad_pais,
             redes_sociales=marca_in.redes_sociales,
@@ -174,11 +175,19 @@ class MarcasService:
             return None
 
         update_data = marca_in.dict(exclude_unset=True)
+        category_changed = "categoria" in update_data
+        if category_changed:
+            update_data["categoria"] = normalize_category(update_data["categoria"])
         banco = update_data.pop("banco", None)
         no_cuenta = update_data.pop("no_cuenta", None)
 
         for key, value in update_data.items():
             setattr(marca, key, value)
+
+        if category_changed:
+            db.query(Producto).filter(Producto.marca_id == marca.id).update(
+                {Producto.categoria: marca.categoria, Producto.detalles_rubro: {}}, synchronize_session=False
+            )
 
         db.commit()
 
@@ -590,6 +599,8 @@ class MarcasService:
                 else:
                     producto = Producto(
                         marca_id=marca_id,
+                        categoria=marca.categoria or "ROPA VARIADA",
+                        detalles_rubro={},
                         sku=item["sku"],
                         nombre=item["nombre"],
                         descripcion=item["descripcion"],
@@ -625,6 +636,7 @@ class MarcasService:
                     motivo=f"Importación de productos desde {ingreso.observaciones}",
                 ))
             db.add_all(detalles + movimientos)
+            qr_pdf = MarcasService._generate_import_qr_pdf(productos_procesados)
             db.commit()
         except Exception:
             db.rollback()
@@ -634,7 +646,59 @@ class MarcasService:
             "creados": productos_creados,
             "actualizados": productos_actualizados,
             "unidades": sum(item["stock_inicial"] for item in rows),
+            "qr_pdf": qr_pdf,
+            "qr_pdf_filename": f"QR_Productos_{marca.id}.pdf",
         }
+
+    @staticmethod
+    def _generate_import_qr_pdf(productos_procesados: list) -> bytes:
+        import qrcode
+
+        # ponytail: rasterizar una hoja carta con Pillow evita añadir una dependencia PDF.
+        page_width, page_height = 1275, 1650  # Carta a 150 DPI
+        columns, rows_per_page = 2, 4
+        cell_width, cell_height = page_width // columns, page_height // rows_per_page
+        font_paths = (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+        )
+        try:
+            font_path = next(path for path in font_paths if os.path.exists(path))
+            title_font = ImageFont.truetype(font_path, 28)
+            detail_font = ImageFont.truetype(font_path, 22)
+            ascii_fallback = False
+        except (OSError, StopIteration):
+            title_font = detail_font = ImageFont.load_default()
+            ascii_fallback = True
+
+        pages = []
+        for page_start in range(0, len(productos_procesados), columns * rows_per_page):
+            page = PILImage.new("RGB", (page_width, page_height), "white")
+            draw = ImageDraw.Draw(page)
+            page_items = productos_procesados[page_start:page_start + columns * rows_per_page]
+            for index, (producto, _) in enumerate(page_items):
+                column, row = index % columns, index // columns
+                left, top = column * cell_width, row * cell_height
+                qr = qrcode.make(producto.codigo_qr or f"BHPOS-{producto.sku}").convert("RGB")
+                qr.thumbnail((300, 300))
+                qr_left = left + (cell_width - qr.width) // 2
+                page.paste(qr, (qr_left, top + 20))
+                center_x = left + cell_width // 2
+                name = producto.nombre or "Producto"
+                sku = f"SKU: {producto.sku}"
+                if ascii_fallback:
+                    import unicodedata
+                    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+                    sku = unicodedata.normalize("NFKD", sku).encode("ascii", "ignore").decode("ascii")
+                draw.text((center_x, top + 335), name, fill="black", font=title_font, anchor="mt")
+                draw.text((center_x, top + 380), sku, fill="black", font=detail_font, anchor="mt")
+                draw.rectangle((left + 12, top + 12, left + cell_width - 12, top + cell_height - 12), outline="#cccccc", width=2)
+            pages.append(page)
+
+        output = io.BytesIO()
+        pages[0].save(output, format="PDF", save_all=True, append_images=pages[1:], resolution=150)
+        return output.getvalue()
 
     @staticmethod
     def delete(db: Session, marca_id: int) -> bool:

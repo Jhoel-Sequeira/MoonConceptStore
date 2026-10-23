@@ -30,7 +30,7 @@ class Marca(Base):
     contacto_nombre = Column(String(255), nullable=True)
     telefono = Column(String(50), nullable=True)
     email = Column(String(255), nullable=True)
-    categoria = Column(Text, nullable=True)
+    categoria = Column(Text, nullable=False)
     ciudad_pais = Column(Text, nullable=True)
     razon_social = Column(Text, nullable=True)
     redes_sociales = Column(Text, nullable=True)

@@ -1,0 +1,1 @@
+ALTER TABLE marcas ALTER COLUMN categoria SET NOT NULL;

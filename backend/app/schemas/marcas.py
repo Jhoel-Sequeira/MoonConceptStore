@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
+from pydantic import validator
+from app.core.categories import PRODUCT_CATEGORIES
 
 class CuentaBase(BaseModel):
     banco: Optional[str] = None
@@ -20,7 +22,7 @@ class MarcaBase(BaseModel):
     nombre_marca: str
     cedula: Optional[str] = None
     codigo: Optional[str] = None
-    categoria: Optional[str] = None
+    categoria: str
     razon_social: Optional[str] = None
     ciudad_pais: Optional[str] = None
     redes_sociales: Optional[str] = None
@@ -34,6 +36,12 @@ class MarcaBase(BaseModel):
     catalogo: Optional[str] = None
     estado_id: int = 2
     logo: Optional[str] = None
+
+    @validator("categoria")
+    def validate_categoria(cls, value):
+        if value not in PRODUCT_CATEGORIES:
+            raise ValueError("Selecciona un rubro válido")
+        return value
 
 class MarcaCreate(MarcaBase):
     banco: Optional[str] = None
@@ -59,6 +67,12 @@ class MarcaUpdate(BaseModel):
     logo: Optional[str] = None
     banco: Optional[str] = None
     no_cuenta: Optional[str] = None
+
+    @validator("categoria")
+    def validate_categoria(cls, value):
+        if value is not None and value not in PRODUCT_CATEGORIES:
+            raise ValueError("Selecciona un rubro válido")
+        return value
 
 class MarcaResponse(MarcaBase):
     id: int

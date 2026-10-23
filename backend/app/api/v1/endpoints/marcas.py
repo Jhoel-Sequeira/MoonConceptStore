@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
+import io
 import os
 from app.core.database import get_db
 from app.api.deps import get_current_user
@@ -141,7 +142,18 @@ def import_marca_products(
         result = MarcasService.import_delivery_template(
             db, marca_id, file.file.read(), current_user.id, file.filename
         )
-        return {"message": "Mercadería importada al inventario", **result}
+        pdf = result.pop("qr_pdf")
+        filename = result.pop("qr_pdf_filename")
+        return StreamingResponse(
+            io.BytesIO(pdf),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Productos-Creados": str(result["creados"]),
+                "X-Productos-Actualizados": str(result["actualizados"]),
+                "X-Unidades": str(result["unidades"]),
+            },
+        )
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc

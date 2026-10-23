@@ -3,6 +3,7 @@ import inventarioService from '../services/inventarioService';
 import marcasService from '../services/marcasService';
 import brandConfig from '../brandConfig';
 import { formatCordobas } from '../utils/currency';
+import { RUBROS, RUBRO_FIELDS } from '../constants/rubros';
 
 export default function CatalogoQRPage() {
   const [productos, setProductos] = useState([]);
@@ -11,6 +12,7 @@ export default function CatalogoQRPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedMarcaId, setSelectedMarcaId] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [previewProduct, setPreviewProduct] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -33,6 +35,7 @@ export default function CatalogoQRPage() {
     precio: '',
     descripcion: '',
     tamano: '',
+    detalles_rubro: {},
     imagen_url: '',
     estado_id: 1,
     stock_inicial: 10,
@@ -45,6 +48,7 @@ export default function CatalogoQRPage() {
       const [prodsData, marcasData, statsData] = await Promise.all([
         inventarioService.getAll({
           marca_id: selectedMarcaId || undefined,
+          categoria: selectedCategory || undefined,
           search: search || undefined,
         }),
         marcasService.getAll(),
@@ -71,7 +75,7 @@ export default function CatalogoQRPage() {
 
   useEffect(() => {
     fetchData();
-  }, [selectedMarcaId]);
+  }, [selectedMarcaId, selectedCategory]);
 
   useEffect(() => {
     const previewUrls = photoFiles.map((file) => URL.createObjectURL(file));
@@ -114,6 +118,7 @@ export default function CatalogoQRPage() {
       precio: '',
       descripcion: '',
       tamano: '',
+      detalles_rubro: {},
       imagen_url: '',
       estado_id: 1,
       stock_inicial: 10,
@@ -134,6 +139,7 @@ export default function CatalogoQRPage() {
       precio: product.precio,
       descripcion: product.descripcion || '',
       tamano: product.tamano || '',
+      detalles_rubro: product.detalles_rubro || {},
       imagen_url: product.imagen_url || '',
       estado_id: product.estado_id ?? 1,
       stock_inicial: product.stock_actual,
@@ -168,6 +174,7 @@ export default function CatalogoQRPage() {
           precio: parseFloat(formData.precio),
           descripcion: formData.descripcion,
           tamano: formData.tamano,
+          detalles_rubro: formData.detalles_rubro,
           imagen_url: (activePhoto && !activePhoto.startsWith('file:') ? activePhoto : formData.imagen_url) || null,
           estado_id: Number(formData.estado_id || 1),
           stock_critico: parseInt(formData.stock_critico || 5),
@@ -254,12 +261,13 @@ export default function CatalogoQRPage() {
 
   const handleExportCSV = () => {
     if (productos.length === 0) return;
-    const headers = ['ID', 'SKU', 'Producto', 'Marca', 'Precio (C$)', 'Stock Actual', 'QR Código'];
+    const headers = ['ID', 'SKU', 'Producto', 'Marca', 'Rubro', 'Precio (C$)', 'Stock Actual', 'QR Código'];
     const rows = productos.map((p) => [
       p.id,
       p.sku,
       `"${p.nombre}"`,
       `"${p.marca_nombre || ''}"`,
+      `"${p.categoria || ''}"`,
       p.precio,
       p.stock_actual,
       p.codigo_qr,
@@ -354,6 +362,18 @@ export default function CatalogoQRPage() {
             </select>
           </div>
 
+          <div className="relative">
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              aria-label="Filtrar por rubro"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-container-low text-on-surface font-label-sm text-label-sm border-none outline-none cursor-pointer"
+            >
+              <option value="">Todos los rubros</option>
+              {RUBROS.map((rubro) => <option key={rubro} value={rubro}>{rubro}</option>)}
+            </select>
+          </div>
+
           {/* Search Input */}
           <form onSubmit={handleSearchSubmit} className="relative flex-1 min-w-[200px] max-w-xs">
             <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-outline text-[18px]">
@@ -431,6 +451,7 @@ export default function CatalogoQRPage() {
                   <th className="py-2.5 px-3">SKU</th>
                   <th className="py-2.5 px-3 min-w-[180px]">Producto</th>
                   <th className="py-2.5 px-3">Marca</th>
+                  <th className="py-2.5 px-3">Rubro</th>
                   <th className="py-2.5 px-3 text-right">Precio Venta</th>
                   <th className="py-2.5 px-3 text-right">Stock Actual</th>
                   <th className="py-2.5 px-4 text-center">Código QR Estado</th>
@@ -499,6 +520,7 @@ export default function CatalogoQRPage() {
                             {prod.marca_nombre || 'N/A'}
                           </span>
                         </td>
+                        <td className="py-3 px-3 text-sm text-on-surface-variant">{prod.categoria || 'ROPA VARIADA'}</td>
                         <td className="py-3 px-3 text-right font-label-md text-label-md font-bold text-on-surface">
                           {formatCordobas(prod.precio)}
                         </td>
@@ -631,10 +653,26 @@ export default function CatalogoQRPage() {
                     <input required value={formData.sku} onChange={(event) => setFormData({ ...formData, sku: event.target.value })} placeholder="Ej. TB-001" className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
                   </label>
                   <label className="block text-xs font-medium text-on-surface-variant">Marca
-                    <select required value={formData.marca_id} onChange={(event) => setFormData({ ...formData, marca_id: event.target.value })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary">
+                    <select required value={formData.marca_id} onChange={(event) => setFormData({ ...formData, marca_id: event.target.value, detalles_rubro: {} })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary">
                       <option value="">Selecciona una marca</option>{marcas.map((brand) => <option key={brand.id} value={brand.id}>{brand.nombre_marca}</option>)}
                     </select>
                   </label>
+                  {(() => {
+                    const selectedBrand = marcas.find((brand) => String(brand.id) === String(formData.marca_id));
+                    const categoryFields = RUBRO_FIELDS[selectedBrand?.categoria] || [];
+                    return categoryFields.length > 0 && (
+                      <fieldset className="rounded-lg border border-outline-variant/30 p-3">
+                        <legend className="px-1 text-xs font-semibold text-on-surface-variant">Detalles · {selectedBrand.categoria}</legend>
+                        <div className="grid grid-cols-2 gap-3">
+                          {categoryFields.map(([key, label]) => (
+                            <label key={key} className="block text-xs font-medium text-on-surface-variant">{label}
+                              <input maxLength={2000} value={formData.detalles_rubro?.[key] || ''} onChange={(event) => setFormData({ ...formData, detalles_rubro: { ...formData.detalles_rubro, [key]: event.target.value } })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
+                            </label>
+                          ))}
+                        </div>
+                      </fieldset>
+                    );
+                  })()}
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-xs font-medium text-on-surface-variant">Precio de venta (C$)
                       <input required type="number" min="0.01" step="0.01" value={formData.precio} onChange={(event) => setFormData({ ...formData, precio: event.target.value })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
@@ -760,6 +798,20 @@ export default function CatalogoQRPage() {
                     {detailProduct.descripcion || 'Sin descripción adicional registrada para este SKU.'}
                   </p>
                 </div>
+
+                {Object.entries(detailProduct.detalles_rubro || {}).filter(([, value]) => value).length > 0 && (
+                  <div className="p-3 bg-surface-container-low rounded-xl">
+                    <span className="text-xs text-on-surface-variant font-semibold">Detalles de {detailProduct.categoria}</span>
+                    <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2">
+                      {Object.entries(detailProduct.detalles_rubro).filter(([, value]) => value).map(([key, value]) => (
+                        <div key={key}>
+                          <dt className="text-[11px] text-on-surface-variant">{RUBRO_FIELDS[detailProduct.categoria]?.find(([fieldKey]) => fieldKey === key)?.[1] || key}</dt>
+                          <dd className="text-xs font-medium text-on-surface">{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between text-xs px-1 text-on-surface-variant">
                   <span>Stock Crítico Configurado:</span>

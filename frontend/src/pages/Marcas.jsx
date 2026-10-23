@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import marcasService from '../services/marcasService';
 import api from '../services/api';
 import { formatCordobas } from '../utils/currency';
+import { RUBROS } from '../constants/rubros';
 
 const apiOrigin = new URL(api.defaults.baseURL).origin;
 
@@ -55,7 +56,7 @@ export default function MarcasPage() {
     nombre_marca: '',
     cedula: '',
     codigo: '',
-    categoria: 'Hogar & Deco',
+    categoria: 'ROPA VARIADA',
     razon_social: '',
     ciudad_pais: '',
     redes_sociales: '',
@@ -116,7 +117,7 @@ export default function MarcasPage() {
       nombre_marca: '',
       cedula: '',
       codigo: '',
-      categoria: 'Hogar & Deco',
+      categoria: 'ROPA VARIADA',
       razon_social: '',
       ciudad_pais: '',
       redes_sociales: '',
@@ -150,7 +151,7 @@ export default function MarcasPage() {
       nombre_marca: brand.nombre_marca || '',
       cedula: brand.cedula || '',
       codigo: brand.codigo || '',
-      categoria: brand.categoria || 'Hogar & Deco',
+      categoria: RUBROS.includes(brand.categoria) ? brand.categoria : 'ROPA VARIADA',
       razon_social: brand.razon_social || '',
       ciudad_pais: brand.ciudad_pais || '',
       redes_sociales: brand.redes_sociales || '',
@@ -221,6 +222,14 @@ export default function MarcasPage() {
     setIsImportingExcel(true);
     try {
       const result = await marcasService.importProductTemplate(brand.id, file);
+      const url = window.URL.createObjectURL(result.pdf);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `QR_Productos_${brand.id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
       alert(`Importación completada para ${brand.nombre_marca}: ${result.creados} productos nuevos, ${result.actualizados} productos existentes con stock aumentado y ${result.unidades} unidades agregadas.`);
       const refreshedBrands = await loadBrands();
       const refreshedBrand = refreshedBrands.find((item) => item.id === brand.id);
@@ -503,12 +512,7 @@ export default function MarcasPage() {
               className="h-10 pl-3 pr-8 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold appearance-none cursor-pointer focus:outline-none"
             >
               <option value="Todas">Todas las Categorías</option>
-              <option value="Hogar & Deco">Hogar & Deco</option>
-              <option value="Moda Sostenible">Moda Sostenible</option>
-              <option value="Cosmética Orgánica">Cosmética Orgánica</option>
-              <option value="Textil Artesanal">Textil Artesanal</option>
-              <option value="Marroquinería">Marroquinería</option>
-              <option value="Papelería & Cerámica">Papelería & Cerámica</option>
+              {RUBROS.map((rubro) => <option key={rubro} value={rubro}>{rubro}</option>)}
             </select>
             <span className="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[16px] pointer-events-none">expand_more</span>
           </div>
@@ -1101,12 +1105,7 @@ export default function MarcasPage() {
                             onChange={(e) => setFormData({ ...formData, categoria: e.target.value })}
                             className="w-full h-9 px-3 rounded-lg bg-slate-50 text-sm text-slate-800 border border-slate-200 focus:outline-none focus:border-indigo-600"
                           >
-                            <option value="Hogar & Deco">Decoración y Hogar</option>
-                            <option value="Moda Sostenible">Indumentaria y Textil</option>
-                            <option value="Cosmética Orgánica">Cosmética Natural y Botánica</option>
-                            <option value="Textil Artesanal">Textil Artesanal</option>
-                            <option value="Marroquinería">Accesorios y Marroquinería</option>
-                            <option value="Papelería & Cerámica">Papelería & Cerámica</option>
+                            {RUBROS.map((rubro) => <option key={rubro} value={rubro}>{rubro}</option>)}
                           </select>
                         </div>
 

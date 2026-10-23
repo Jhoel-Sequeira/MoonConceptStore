@@ -9,6 +9,8 @@ class Producto(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     marca_id = Column(Integer, ForeignKey("marcas.id"), nullable=False)
+    categoria = Column(String(100), nullable=False, server_default=text("'ROPA VARIADA'"))
+    detalles_rubro = Column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
     codigo_qr = Column(String(255), nullable=False)
     sku = Column(String(100), nullable=True, unique=True, index=True)
     nombre = Column(String(255), nullable=False)

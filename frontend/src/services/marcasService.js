@@ -57,10 +57,27 @@ export const marcasService = {
   importProductTemplate: async (id, file) => {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await api.post(`/marcas/${id}/importar-productos`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return response.data;
+    try {
+      const response = await api.post(`/marcas/${id}/importar-productos`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        responseType: 'blob',
+      });
+      return {
+        pdf: response.data,
+        creados: Number(response.headers['x-productos-creados'] || 0),
+        actualizados: Number(response.headers['x-productos-actualizados'] || 0),
+        unidades: Number(response.headers['x-unidades'] || 0),
+      };
+    } catch (error) {
+      if (error.response?.data instanceof Blob) {
+        try {
+          error.response.data = JSON.parse(await error.response.data.text());
+        } catch {
+          // Keep the original response if the server returned a non-JSON error.
+        }
+      }
+      throw error;
+    }
   },
 };
 

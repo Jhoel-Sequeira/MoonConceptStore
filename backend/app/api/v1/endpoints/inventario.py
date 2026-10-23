@@ -15,6 +15,7 @@ from app.schemas.inventario import (
 )
 from app.services.inventario_service import InventarioService
 from app.models.inventario import Producto
+from app.core.categories import PRODUCT_CATEGORIES
 
 router = APIRouter()
 
@@ -22,10 +23,13 @@ router = APIRouter()
 def get_productos(
     marca_id: Optional[int] = Query(None, description="Filtrar por ID de marca"),
     search: Optional[str] = Query(None, description="Búsqueda por SKU o nombre"),
+    categoria: Optional[str] = Query(None, description="Filtrar por rubro"),
     db: Session = Depends(get_db)
 ):
     """Listar productos de inventario con stock calculado y QR status"""
-    return InventarioService.get_all(db, marca_id=marca_id, search=search)
+    if categoria and categoria not in PRODUCT_CATEGORIES:
+        raise HTTPException(status_code=422, detail="Rubro no válido")
+    return InventarioService.get_all(db, marca_id=marca_id, search=search, categoria=categoria)
 
 @router.get("/stats", response_model=InventarioStats)
 def get_inventario_stats(db: Session = Depends(get_db)):

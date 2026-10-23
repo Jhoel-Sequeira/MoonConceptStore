@@ -8,6 +8,7 @@ import qrcode
 from app.models.inventario import Producto, Kardex
 from app.models.marcas import Marca
 from app.schemas.inventario import ProductoCreate, ProductoUpdate, ProductoResponse, InventarioStats
+from app.core.categories import validate_category_details
 
 class InventarioService:
     @staticmethod
@@ -80,6 +81,8 @@ class InventarioService:
             qr_image_url=qr_rel_path,
             marca_id=p.marca_id,
             marca_nombre=marca_nom,
+            categoria=p.categoria or (p.marca.categoria if p.marca else "ROPA VARIADA"),
+            detalles_rubro=p.detalles_rubro or {},
             marca_codigo=marca_cod,
             stock_actual=int(stock),
             qr_status="Generado" if p.codigo_qr else "Pendiente Imprimir"
@@ -89,11 +92,14 @@ class InventarioService:
     def get_all(
         db: Session, 
         marca_id: Optional[int] = None, 
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        categoria: Optional[str] = None,
     ) -> List[ProductoResponse]:
         query = db.query(Producto)
         if marca_id:
             query = query.filter(Producto.marca_id == marca_id)
+        if categoria:
+            query = query.filter(Producto.categoria == categoria)
         if search:
             s = f"%{search.strip()}%"
             query = query.filter((Producto.nombre.ilike(s)) | (Producto.sku.ilike(s)) | (Producto.descripcion.ilike(s)))
@@ -137,13 +143,16 @@ class InventarioService:
         sku = item_in.sku.strip().upper()
         if not sku:
             raise ValueError("El SKU es obligatorio")
-        if not db.query(Marca.id).filter(Marca.id == item_in.marca_id).first():
+        marca = db.query(Marca).filter(Marca.id == item_in.marca_id).first()
+        if not marca:
             raise ValueError("La marca seleccionada no existe")
         if db.query(Producto.id).filter(func.upper(Producto.sku) == sku).first():
             raise ValueError(f"El SKU {sku} ya está registrado")
         qr_code_str = f"BHPOS-{sku}"
         nuevo = Producto(
             marca_id=item_in.marca_id,
+            categoria=marca.categoria or "ROPA VARIADA",
+            detalles_rubro=validate_category_details(marca.categoria or "ROPA VARIADA", item_in.detalles_rubro),
             sku=sku,
             nombre=item_in.nombre.strip(),
             descripcion=item_in.descripcion,
@@ -192,8 +201,17 @@ class InventarioService:
                 func.upper(Producto.sku) == update_data["sku"], Producto.id != producto_id
             ).first():
                 raise ValueError(f"El SKU {update_data['sku']} ya está registrado")
-        if "marca_id" in update_data and not db.query(Marca.id).filter(Marca.id == update_data["marca_id"]).first():
-            raise ValueError("La marca seleccionada no existe")
+        if "marca_id" in update_data:
+            marca = db.query(Marca).filter(Marca.id == update_data["marca_id"]).first()
+            if not marca:
+                raise ValueError("La marca seleccionada no existe")
+            update_data["categoria"] = marca.categoria or "ROPA VARIADA"
+            if "detalles_rubro" in update_data:
+                update_data["detalles_rubro"] = validate_category_details(update_data["categoria"], update_data["detalles_rubro"])
+            elif marca.id != p.marca_id:
+                update_data["detalles_rubro"] = {}
+        elif "detalles_rubro" in update_data:
+            update_data["detalles_rubro"] = validate_category_details(p.categoria, update_data["detalles_rubro"])
         if "nombre" in update_data:
             update_data["nombre"] = (update_data["nombre"] or "").strip()
             if not update_data["nombre"]:
