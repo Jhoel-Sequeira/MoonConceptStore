@@ -23,15 +23,16 @@ export default function CierreCajaPage() {
     setLoading(true);
     try {
       const data = await finanzasService.obtenerCierre();
-      setCierre(data);
+      if (!data || typeof data !== 'object') throw new Error('El servidor devolvió una respuesta inválida.');
+      setCierre({ ...data, ventas: data.ventas || {}, contado: data.contado || null });
       if (data.cerrado) {
-        setFondo(String(data.fondo_inicial));
-        setContado(Object.fromEntries(fields.map(({ key }) => [key, String(data.contado[key])])));
+        setFondo(String(data.fondo_inicial ?? 0));
+        setContado(Object.fromEntries(fields.map(({ key }) => [key, String(data.contado?.[key] ?? 0)])));
         setObservaciones(data.observaciones || '');
       }
       setError('');
     } catch (err) {
-      setError(err.response?.data?.detail || 'No se pudo cargar el cierre de caja.');
+      setError(err.response?.data?.detail || err.message || 'No se pudo cargar el cierre de caja.');
     } finally {
       setLoading(false);
     }
@@ -99,7 +100,7 @@ export default function CierreCajaPage() {
         </span>
       </div>
 
-      {error && <div role="alert" className="p-3 rounded-lg bg-error-container text-error text-sm">{error}</div>}
+      {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-error-container text-error text-sm"><span>{error}</span><button type="button" onClick={refresh} disabled={loading} className="font-semibold underline disabled:opacity-60">Reintentar</button></div>}
       {loading ? <SplashScreen compact message="Cargando movimientos de caja..." /> : cierre && (
         <form onSubmit={submit} className="flex flex-col gap-5">
           <section className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
@@ -115,14 +116,14 @@ export default function CierreCajaPage() {
                 </tr></thead>
                 <tbody className="divide-y divide-surface-container-low text-sm">
                   {fields.map(({ key, label, icon }) => {
-                    const actual = isClosed ? Number(cierre.contado[key]) : Number(contado[key] || 0);
+      const actual = isClosed ? Number(cierre.contado?.[key] ?? 0) : Number(contado[key] || 0);
                     const diff = actual - Number(expected[key] || 0);
                     return <tr key={key}>
                       <td className="py-4 px-4"><span className="material-symbols-outlined align-middle mr-2 text-primary">{icon}</span>{label}</td>
-                      <td className="py-4 px-4 text-right">{formatCordobas(cierre.ventas[key] || 0)}</td>
+                      <td className="py-4 px-4 text-right">{formatCordobas(cierre.ventas?.[key] || 0)}</td>
                       <td className="py-4 px-4 text-right font-semibold">{formatCordobas(expected[key] || 0)}</td>
                       <td className="py-4 px-4 text-right">
-                        {isClosed ? formatCordobas(cierre.contado[key]) : <input aria-label={`Contado ${label}`} required min="0" type="number" step="0.01" value={contado[key]} onChange={(e) => setContado({ ...contado, [key]: e.target.value })} className="w-32 px-2 py-1 rounded border border-outline-variant text-right" />}
+                        {isClosed ? formatCordobas(cierre.contado?.[key] ?? 0) : <input aria-label={`Contado ${label}`} required min="0" type="number" step="0.01" value={contado[key]} onChange={(e) => setContado({ ...contado, [key]: e.target.value })} className="w-32 px-2 py-1 rounded border border-outline-variant text-right" />}
                       </td>
                       <td className={`py-4 px-4 text-right font-semibold ${Math.abs(diff) < 0.01 ? 'text-secondary' : 'text-error'}`}>{formatCordobaDifference(diff)}</td>
                     </tr>;

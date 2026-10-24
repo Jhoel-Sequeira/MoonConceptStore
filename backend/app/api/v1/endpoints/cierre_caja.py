@@ -12,11 +12,13 @@ router = APIRouter()
 
 
 @router.get("/")
+@router.get("")
 def get_cierre_caja(db: Session = Depends(get_db), _: Usuario = Depends(get_current_user)):
     return CierreCajaService.current(db)
 
 
 @router.post("/")
+@router.post("")
 def close_caja(
     values: CierreCajaCreate,
     db: Session = Depends(get_db),

@@ -1,8 +1,8 @@
 import api from './api';
 
 const finanzasService = {
-  obtenerCierre: async () => (await api.get('/cierre-caja/')).data,
-  cerrarCaja: async (datos) => (await api.post('/cierre-caja/', datos)).data,
+  obtenerCierre: async () => (await api.get('/cierre-caja')).data,
+  cerrarCaja: async (datos) => (await api.post('/cierre-caja', datos)).data,
   reabrirCaja: async () => (await api.post('/cierre-caja/reabrir')).data,
   obtenerReporte: async (periodo) => (await api.get('/liquidaciones/reporte', { params: { periodo } })).data,
   obtenerLiquidaciones: async (periodo) => (await api.get('/liquidaciones/', { params: { periodo } })).data,
