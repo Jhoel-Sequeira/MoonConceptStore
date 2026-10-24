@@ -14,6 +14,7 @@ import CierreCajaPage from './pages/CierreCaja';
 import LiquidacionesPage from './pages/Liquidaciones';
 import RentaPage from './pages/Renta';
 import api from './services/api';
+import { FeedbackProvider } from './components/ui/FeedbackProvider';
 
 const canManageUsers = (user) => /admin|administrador/i.test(user?.role || '');
 
@@ -48,7 +49,7 @@ export default function App() {
   };
 
   return (
-    <BrowserRouter>
+    <FeedbackProvider><BrowserRouter>
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage onLogin={handleLogin} />} />
         <Route path="/*" element={user ? (
@@ -71,6 +72,6 @@ export default function App() {
           </Layout>
         ) : <Navigate to="/login" replace />} />
       </Routes>
-    </BrowserRouter>
+    </BrowserRouter></FeedbackProvider>
   );
 }

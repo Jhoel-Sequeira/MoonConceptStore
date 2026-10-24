@@ -327,17 +327,17 @@ class MarcasService:
         ws.sheet_view.showGridLines = False
         ws.freeze_panes = "A11"
 
-        # Paleta de la tienda: rosa, blush, dorado y blanco.
-        rose = "E9B7C3"
-        pink = "F7D1D6"
-        blush = "F3E2D9"
+        # Paleta de plantillas: blanco, dorado y tonos neutros.
+        rose = "FFFFFF"
+        pink = "FFFFFF"
+        blush = "FFFFFF"
         gold = "C9A46D"
         white = "FFFFFF"
         ink = "493A35"
         muted = "786963"
         line = "E8D8D1"
         zebra = "FFFAF8"
-        input_fill = "FFF3F4"
+        input_fill = white
         gold_light = "F8F0E4"
         border = Border(*(Side(style="thin", color=line) for _ in range(4)))
         widths = {"A": 7, "B": 20, "C": 32, "D": 38, "E": 22, "F": 20, "G": 38}
@@ -440,7 +440,7 @@ class MarcasService:
 
         for col, title in enumerate(headers, start=1):
             c = ws.cell(10, col, title)
-            c.font = Font(name="Segoe UI", size=9, bold=True, color=white)
+            c.font = Font(name="Segoe UI", size=9, bold=True, color=white if col in (5, 6) else ink)
             c.fill = PatternFill("solid", fgColor=gold if col in (5, 6) else (pink if col >= category_start_col else rose))
             c.border = border
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)

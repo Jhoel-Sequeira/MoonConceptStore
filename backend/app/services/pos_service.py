@@ -174,16 +174,27 @@ class POSService:
             )
             total = subtotal + commission
 
-            customer_name = sale_in.cliente.strip() or "Consumidor Final"
-            customer_id = db.execute(
-                text("SELECT id FROM clientes WHERE lower(trim(nombre_cliente)) = lower(:name) ORDER BY id LIMIT 1"),
-                {"name": customer_name},
-            ).scalar()
-            if customer_id is None:
+            if sale_in.cliente_id:
+                customer = db.execute(
+                    text("SELECT id, nombre_cliente FROM clientes WHERE id = :id"),
+                    {"id": sale_in.cliente_id},
+                ).mappings().first()
+                if not customer:
+                    raise ValueError("El cliente seleccionado ya no existe")
+                customer_id = customer["id"]
+                customer_name = customer["nombre_cliente"]
+            else:
+                # ponytail: use one shared final-consumer record to honor the existing NOT NULL FK.
+                customer_name = (sale_in.cliente or "").strip() or "Consumidor Final"
                 customer_id = db.execute(
-                    text("INSERT INTO clientes (nombre_cliente) VALUES (:name) RETURNING id"),
+                    text("SELECT id FROM clientes WHERE lower(trim(nombre_cliente)) = lower(:name) ORDER BY id LIMIT 1"),
                     {"name": customer_name},
-                ).scalar_one()
+                ).scalar()
+                if customer_id is None:
+                    customer_id = db.execute(
+                        text("INSERT INTO clientes (nombre_cliente) VALUES (:name) RETURNING id"),
+                        {"name": customer_name},
+                    ).scalar_one()
 
             invoice_state_id = db.execute(
                 text("SELECT id FROM estados WHERE modulo = 'ventas' AND nombre = 'Facturada' ORDER BY id LIMIT 1")

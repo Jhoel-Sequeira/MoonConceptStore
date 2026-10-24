@@ -10,7 +10,8 @@ class VentaItemCreate(BaseModel):
 
 
 class VentaCreate(BaseModel):
-    cliente: str = Field(default="Consumidor Final", min_length=1, max_length=255)
+    cliente_id: Optional[int] = Field(default=None, gt=0)
+    cliente: Optional[str] = Field(default=None, max_length=255)
     metodo_pago: str = Field(min_length=1, max_length=100)
     items: List[VentaItemCreate] = Field(min_length=1, max_length=100)
 

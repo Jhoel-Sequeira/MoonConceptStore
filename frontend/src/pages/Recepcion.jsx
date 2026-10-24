@@ -4,6 +4,7 @@ import brandConfig from '../brandConfig';
 import recepcionService from '../services/recepcionService';
 import { inventarioService } from '../services/inventarioService';
 import { formatCordobas } from '../utils/currency';
+import { SplashScreen } from '../components/ui/FeedbackProvider';
 
 const dateLabel = (value) => {
   if (!value) return '—';
@@ -105,7 +106,7 @@ export default function RecepcionPage() {
               <th className="px-4 py-3">Recepción</th><th className="px-4 py-3">Marca</th><th className="px-4 py-3">Fecha</th><th className="px-4 py-3 text-right">Productos</th><th className="px-4 py-3 text-right">Unidades</th><th className="px-4 py-3">Archivo / origen</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3"></th>
             </tr></thead>
             <tbody className="divide-y divide-surface-container-low">
-              {loading ? <tr><td colSpan="8" className="px-4 py-12 text-center text-on-surface-variant">Cargando historial…</td></tr>
+              {loading ? <tr><td colSpan="8"><SplashScreen compact message="Cargando recepciones..." /></td></tr>
                 : filtered.length === 0 ? <tr><td colSpan="8" className="px-4 py-12 text-center text-on-surface-variant">{ingresos.length ? 'No hay resultados para esta búsqueda.' : 'Aún no hay importaciones registradas. Importa una plantilla desde el detalle de una marca.'}</td></tr>
                   : filtered.map((row) => <tr key={row.ingreso_id} onClick={() => openDetail(row)} className="cursor-pointer transition hover:bg-surface-container-low/70" title="Ver detalle de recepción">
                     <td className="px-4 py-4 font-mono font-semibold text-primary">{row.id}</td><td className="px-4 py-4 font-semibold text-on-surface">{row.marca}</td><td className="px-4 py-4 text-on-surface-variant">{dateLabel(row.fecha)}</td><td className="px-4 py-4 text-right tabular-nums">{row.items}</td><td className="px-4 py-4 text-right font-semibold tabular-nums">{row.unidades}</td><td className="max-w-52 truncate px-4 py-4 text-on-surface-variant" title={row.comprobante}>{row.comprobante || 'Importación de plantilla'}</td><td className="px-4 py-4"><span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">{row.estado}</span></td><td className="px-4 py-4 text-right"><span className="material-symbols-outlined text-on-surface-variant">chevron_right</span></td>

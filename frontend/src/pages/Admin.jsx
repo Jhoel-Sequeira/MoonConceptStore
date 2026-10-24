@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import adminService from '../services/adminService';
+import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
 
 const DEFAULT_ROLES = [
   'Administrador General',
@@ -28,6 +29,7 @@ function getErrorMessage(error) {
 }
 
 export default function AdminPage() {
+  const { confirm } = useFeedback();
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState(DEFAULT_ROLES);
   const [activeCount, setActiveCount] = useState(0);
@@ -135,7 +137,7 @@ export default function AdminPage() {
 
   const toggleUserStatus = async (user) => {
     const activate = user.estado !== 'Activo';
-    if (!activate && !window.confirm(`¿Desactivar la cuenta de ${user.nombre}? Ya no podrá iniciar sesión.`)) return;
+    if (!activate && !(await confirm(`¿Desactivar la cuenta de ${user.nombre}? Ya no podrá iniciar sesión.`, { title: 'Desactivar cuenta', confirmLabel: 'Desactivar' }))) return;
     setError('');
     setNotice('');
     try {
@@ -200,7 +202,7 @@ export default function AdminPage() {
           <span className="text-sm text-on-surface-variant">{filteredUsers.length} resultados</span>
         </div>
         {loading ? (
-          <p className="p-10 text-center text-sm text-on-surface-variant">Cargando usuarios…</p>
+          <SplashScreen compact message="Cargando usuarios..." />
         ) : filteredUsers.length ? (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left">

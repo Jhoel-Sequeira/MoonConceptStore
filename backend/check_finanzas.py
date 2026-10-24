@@ -65,4 +65,6 @@ finally:
 sheet = load_workbook(BytesIO(workbook_bytes), data_only=True)["Liquidacion_Marca"]
 assert workbook_name == "Liquidacion_Marca_Demo_2026-09.xlsx"
 assert sheet["B2"].value == "LIQUIDACIÓN MENSUAL · DETALLE DE VENTAS"
+assert sheet["A10"].fill.fgColor.rgb.endswith("FFFFFF") and sheet["A10"].font.color.rgb.endswith("493A35")
+assert sheet["E10"].fill.fgColor.rgb.endswith("C9A46D")
 assert sheet["J12"].value == 2.0 and sheet["K12"].value == 8.0

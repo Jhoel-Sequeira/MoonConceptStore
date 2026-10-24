@@ -3,6 +3,7 @@ import marcasService from '../services/marcasService';
 import api from '../services/api';
 import { formatCordobas } from '../utils/currency';
 import { RUBROS } from '../constants/rubros';
+import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
 
 const apiOrigin = new URL(api.defaults.baseURL).origin;
 
@@ -29,6 +30,7 @@ const getBrandVisuals = (name, index = 0) => {
 };
 
 export default function MarcasPage() {
+  const { notify, confirm } = useFeedback();
   const [brands, setBrands] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -198,7 +200,7 @@ export default function MarcasPage() {
       }
     } catch (err) {
       console.error("Error subiendo logo:", err);
-      alert("Error al subir el logo: " + (err.response?.data?.detail || err.message));
+      notify("Error al subir el logo: " + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setIsUploadingLogo(false);
     }
@@ -211,7 +213,7 @@ export default function MarcasPage() {
       await marcasService.downloadFichaEntrega(brand.id, brand.nombre_marca, brand.categoria);
     } catch (err) {
       console.error("Error descargando ficha de entrega:", err);
-      alert("Error al generar la ficha de entrega: " + (err.response?.data?.detail || err.message));
+      notify("Error al generar la ficha de entrega: " + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setIsDownloadingExcel(false);
     }
@@ -230,12 +232,12 @@ export default function MarcasPage() {
       link.click();
       document.body.removeChild(link);
       window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
-      alert(`Importación completada para ${brand.nombre_marca}: ${result.creados} productos nuevos, ${result.actualizados} productos existentes con stock aumentado y ${result.unidades} unidades agregadas.`);
+      notify(`Importación completada para ${brand.nombre_marca}: ${result.creados} productos nuevos, ${result.actualizados} productos existentes con stock aumentado y ${result.unidades} unidades agregadas.`, 'success');
       const refreshedBrands = await loadBrands();
       const refreshedBrand = refreshedBrands.find((item) => item.id === brand.id);
       if (refreshedBrand && selectedBrandForDetail?.id === brand.id) setSelectedBrandForDetail(refreshedBrand);
     } catch (err) {
-      alert("No se pudo importar la plantilla: " + (err.response?.data?.detail || err.message));
+      notify("No se pudo importar la plantilla: " + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setIsImportingExcel(false);
       if (input) input.value = '';
@@ -285,7 +287,7 @@ export default function MarcasPage() {
       setIsModalOpen(false);
     } catch (err) {
       console.error("Error al guardar marca:", err);
-      alert("Error al guardar la marca en la base de datos: " + (err.response?.data?.detail || err.message));
+      notify("Error al guardar la marca en la base de datos: " + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -293,7 +295,7 @@ export default function MarcasPage() {
 
   // Eliminar Marca en MySQL via API
   const handleDeleteBrand = async (id) => {
-    if (window.confirm("¿Seguro que deseas dar de baja o eliminar esta marca?")) {
+    if (await confirm("¿Seguro que deseas dar de baja o eliminar esta marca?", { title: 'Eliminar marca', confirmLabel: 'Eliminar' })) {
       try {
         await marcasService.delete(id);
         if (selectedBrandForDetail && selectedBrandForDetail.id === id) {
@@ -302,7 +304,7 @@ export default function MarcasPage() {
         await loadBrands();
       } catch (err) {
         console.error("Error al eliminar marca:", err);
-        alert("Error al eliminar la marca: " + (err.response?.data?.detail || err.message));
+        notify("Error al eliminar la marca: " + (err.response?.data?.detail || err.message), 'error');
       }
     }
   };
@@ -550,12 +552,7 @@ export default function MarcasPage() {
             <tbody className="divide-y divide-slate-100 text-sm">
               {isLoading ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-12 text-slate-500">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <span className="material-symbols-outlined animate-spin text-indigo-600 text-[28px]">sync</span>
-                      <span className="text-sm font-medium">Cargando marcas desde la base de datos MySQL...</span>
-                    </div>
-                  </td>
+                  <td colSpan="7"><SplashScreen compact message="Cargando marcas..." /></td>
                 </tr>
               ) : errorMessage ? (
                 <tr>

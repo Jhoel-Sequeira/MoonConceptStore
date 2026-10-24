@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { formatCordobas } from '../utils/currency';
 import finanzasService from '../services/finanzasService';
 import api from '../services/api';
+import { SplashScreen } from '../components/ui/FeedbackProvider';
 
 const localDateParts = (options) => Object.fromEntries(new Intl.DateTimeFormat('en', { timeZone: 'America/Managua', ...options }).formatToParts(new Date()).map(({ type, value }) => [type, value]));
 const currentPeriod = () => { const p = localDateParts({ year: 'numeric', month: '2-digit' }); return `${p.year}-${p.month}`; };
@@ -223,7 +224,7 @@ export default function LiquidacionesPage() {
       </nav>
 
       {error && <div role="alert" className="p-3 rounded-lg bg-error-container text-error text-sm">{error}</div>}
-      {view === 'report' && (loading ? <p className="text-on-surface-variant">Cargando reporte…</p> : summary && <>
+      {view === 'report' && (loading ? <SplashScreen message="Cargando reportes y liquidaciones..." /> : summary && <>
         <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {[
             ['Ventas de productos', summary.ventas_brutas], ['Retención tienda (20%)', summary.comision_tienda],
@@ -322,7 +323,7 @@ export default function LiquidacionesPage() {
         </section>}
 
         <section className="overflow-hidden rounded-xl bg-surface-container-lowest shadow-sm">
-          {salesLoading ? <p className="p-8 text-center text-on-surface-variant">Cargando historial…</p> : !salesHistory?.ventas?.length ? <p className="p-8 text-center text-on-surface-variant">No hay ventas que coincidan con esos filtros.</p> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="bg-surface-container-low text-xs uppercase text-on-surface-variant"><th className="p-3">Factura</th><th className="p-3">Fecha</th><th className="p-3">Cliente</th><th className="p-3">Marcas</th><th className="p-3">Método</th><th className="p-3 text-right">Subtotal</th><th className="p-3 text-right">POS</th><th className="p-3 text-right">Cobrado</th><th className="p-3">Detalle</th></tr></thead><tbody className="divide-y divide-surface-container-low">
+          {salesLoading ? <SplashScreen compact message="Cargando historial de ventas..." /> : !salesHistory?.ventas?.length ? <p className="p-8 text-center text-on-surface-variant">No hay ventas que coincidan con esos filtros.</p> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="bg-surface-container-low text-xs uppercase text-on-surface-variant"><th className="p-3">Factura</th><th className="p-3">Fecha</th><th className="p-3">Cliente</th><th className="p-3">Marcas</th><th className="p-3">Método</th><th className="p-3 text-right">Subtotal</th><th className="p-3 text-right">POS</th><th className="p-3 text-right">Cobrado</th><th className="p-3">Detalle</th></tr></thead><tbody className="divide-y divide-surface-container-low">
             {salesHistory.ventas.map((sale) => <React.Fragment key={sale.id}>
               <tr className={expandedSaleId === sale.id ? 'bg-surface-container-low/70' : ''}>
                 <td className="p-3 font-semibold">#{sale.id}</td><td className="p-3 whitespace-nowrap">{sale.fecha_venta ? new Date(sale.fecha_venta).toLocaleString('es-NI', { timeZone: 'America/Managua' }) : '—'}</td><td className="p-3">{sale.cliente}</td><td className="p-3">{sale.marcas.join(', ') || '—'}</td><td className="p-3">{sale.metodo_pago}</td><td className="p-3 text-right">{formatCordobas(sale.subtotal)}</td><td className="p-3 text-right">{formatCordobas(sale.comision_pos)}</td><td className="p-3 text-right font-bold">{formatCordobas(sale.total)}</td>

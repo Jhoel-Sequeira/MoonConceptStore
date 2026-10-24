@@ -4,6 +4,7 @@ import bajasRetirosService from '../services/bajasRetirosService';
 import marcasService from '../services/marcasService';
 import { inventarioService } from '../services/inventarioService';
 import { formatCordobas } from '../utils/currency';
+import { SplashScreen } from '../components/ui/FeedbackProvider';
 
 const formatDate = (value) => {
   if (!value) return '—';
@@ -239,7 +240,7 @@ export default function BajasRetirosPage() {
               <th className="px-4 py-3">Código</th><th className="px-4 py-3">Marca</th><th className="px-4 py-3">Motivo</th><th className="px-4 py-3 text-right">Productos</th><th className="px-4 py-3 text-right">Unidades</th><th className="px-4 py-3">Fecha</th><th className="px-4 py-3">Registrado por</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3"></th>
             </tr></thead>
             <tbody className="divide-y divide-surface-container-low">
-              {loading ? <tr><td colSpan="9" className="px-4 py-12 text-center text-on-surface-variant">Cargando retiros…</td></tr>
+              {loading ? <tr><td colSpan="9"><SplashScreen compact message="Cargando retiros..." /></td></tr>
                 : filtered.length === 0 ? <tr><td colSpan="9" className="px-4 py-12 text-center text-on-surface-variant">{retiros.length ? 'No hay resultados para esta búsqueda.' : 'Todavía no hay retiros registrados.'}</td></tr>
                   : filtered.map((row) => <tr key={row.retiro_id} onClick={() => openDetail(row)} className="cursor-pointer transition hover:bg-surface-container-low/70" title="Ver detalle del retiro">
                     <td className="px-4 py-4 font-mono font-semibold text-error">{row.id}</td><td className="px-4 py-4 font-semibold text-on-surface">{row.marca}</td><td className="max-w-56 truncate px-4 py-4 text-on-surface-variant" title={row.motivo}>{row.motivo}</td><td className="px-4 py-4 text-right tabular-nums">{row.items}</td><td className="px-4 py-4 text-right font-semibold text-error tabular-nums">-{row.unidades}</td><td className="px-4 py-4 text-on-surface-variant">{formatDate(row.fecha)}</td><td className="px-4 py-4 text-on-surface-variant">{row.solicitado_por}</td><td className="px-4 py-4"><span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">{row.estado}</span></td><td className="px-4 py-4 text-right"><span className="material-symbols-outlined text-on-surface-variant">chevron_right</span></td>

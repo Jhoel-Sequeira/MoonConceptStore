@@ -4,8 +4,10 @@ import marcasService from '../services/marcasService';
 import brandConfig from '../brandConfig';
 import { formatCordobas } from '../utils/currency';
 import { RUBROS, RUBRO_FIELDS } from '../constants/rubros';
+import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
 
 export default function CatalogoQRPage() {
+  const { notify, confirm } = useFeedback();
   const [productos, setProductos] = useState([]);
   const [marcas, setMarcas] = useState([]);
   const [stats, setStats] = useState(null);
@@ -152,14 +154,14 @@ export default function CatalogoQRPage() {
   };
 
   const handleDeleteProduct = async (productId) => {
-    if (window.confirm("¿Seguro que deseas eliminar este producto y sus movimientos de Kardex?")) {
+    if (await confirm("¿Seguro que deseas eliminar este producto y sus movimientos de Kardex?", { title: 'Eliminar producto', confirmLabel: 'Eliminar' })) {
       try {
         await inventarioService.delete(productId);
         if (detailProduct?.id === productId) setDetailProduct(null);
         if (previewProduct?.id === productId) setPreviewProduct(null);
         fetchData();
       } catch (err) {
-        alert("Error al eliminar producto: " + (err.response?.data?.detail || err.message));
+        notify("Error al eliminar producto: " + (err.response?.data?.detail || err.message), 'error');
       }
     }
   };
@@ -215,10 +217,10 @@ export default function CatalogoQRPage() {
       setProductToEdit(null);
       fetchData();
       if (photoUploadError) {
-        alert(`El producto se guardó, pero no se pudo cargar la foto: ${photoUploadError}`);
+        notify(`El producto se guardó, pero no se pudo cargar la foto: ${photoUploadError}`, 'warning');
       }
     } catch (err) {
-      alert('Error al guardar producto: ' + (err.response?.data?.detail || err.message));
+      notify('Error al guardar producto: ' + (err.response?.data?.detail || err.message), 'error');
     }
   };
 
@@ -234,10 +236,10 @@ export default function CatalogoQRPage() {
       setDetailProduct(updatedProduct);
       setPreviewProduct(updatedProduct);
       setProductos(productos.map(p => p.id === product.id ? updatedProduct : p));
-      alert("¡Código QR generado y guardado en Supabase Storage!");
+      notify("¡Código QR generado y guardado en Supabase Storage!", 'success');
     } catch (err) {
       console.error("Error al generar QR:", err);
-      alert("Error al generar QR: " + (err.response?.data?.detail || err.message));
+      notify("Error al generar QR: " + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setIsGeneratingQr(false);
     }
@@ -466,9 +468,7 @@ export default function CatalogoQRPage() {
               <tbody className="divide-y-0 font-body-sm text-body-sm text-on-surface">
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-on-surface-variant">
-                      Cargando productos de inventario...
-                    </td>
+                    <td colSpan={8}><SplashScreen compact message="Cargando inventario..." /></td>
                   </tr>
                 ) : productos.length === 0 ? (
                   <tr>
@@ -637,9 +637,9 @@ export default function CatalogoQRPage() {
                       <span className="material-symbols-outlined">add</span>
                       <input type="file" multiple accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => {
                         const selectedFiles = Array.from(event.target.files || []);
-                        if (storedPhotoUrls.length + photoFiles.length + selectedFiles.length > 10) { alert('Cada producto admite hasta 10 fotos.'); event.target.value = ''; return; }
+                        if (storedPhotoUrls.length + photoFiles.length + selectedFiles.length > 10) { notify('Cada producto admite hasta 10 fotos.', 'warning'); event.target.value = ''; return; }
                         const invalidFile = selectedFiles.find((file) => !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 8 * 1024 * 1024);
-                        if (invalidFile) { alert('Usa im?genes JPG, PNG o WEBP de m?ximo 8 MB cada una.'); event.target.value = ''; return; }
+                        if (invalidFile) { notify('Usa imágenes JPG, PNG o WEBP de máximo 8 MB cada una.', 'warning'); event.target.value = ''; return; }
                         const firstNewIndex = photoFiles.length;
                         setPhotoFiles((current) => [...current, ...selectedFiles]);
                         if (!activePhoto || !visiblePhotoUrls.length) setActivePhoto('file:' + firstNewIndex);

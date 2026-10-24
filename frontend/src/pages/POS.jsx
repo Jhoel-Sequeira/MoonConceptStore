@@ -3,7 +3,9 @@ import { BrowserQRCodeReader } from '@zxing/browser';
 import brandConfig from '../brandConfig';
 import inventarioService from '../services/inventarioService';
 import posService from '../services/posService'; // Opcional, si tienes endpoint de venta
+import clientesService from '../services/clientesService';
 import { formatCordobas } from '../utils/currency';
+import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
 
 function InvoiceBarcode({ value }) {
   const text = String(value || '000000');
@@ -24,6 +26,7 @@ const formatInvoiceDate = (value) => new Intl.DateTimeFormat('es-NI', {
 }).format(new Date(value));
 const normalizeSearch = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 export default function POSPage() {
+  const { notify } = useFeedback();
   const [productos, setProductos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cart, setCart] = useState([]);
@@ -36,7 +39,11 @@ export default function POSPage() {
   const [cashEntryOpen, setCashEntryOpen] = useState(false);
   const [cardPaymentOpen, setCardPaymentOpen] = useState(false);
   const [cashReceived, setCashReceived] = useState('');
-  const [customer, setCustomer] = useState('Consumidor Final');
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [customerQuery, setCustomerQuery] = useState('');
+  const [customerOptions, setCustomerOptions] = useState([]);
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
   const [processingSale, setProcessingSale] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -62,6 +69,25 @@ export default function POSPage() {
   useEffect(() => {
     cargarProductos();
   }, []);
+  useEffect(() => {
+    if (!customerSearchOpen) return undefined;
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      try {
+        setCustomerSearchLoading(true);
+        const matches = await clientesService.getAll({ buscar: customerQuery.trim(), limite: 8 });
+        if (active) setCustomerOptions(matches);
+      } catch (error) {
+        if (active) {
+          setCustomerOptions([]);
+          notify(error.response?.data?.detail || 'No se pudo buscar clientes.', 'error');
+        }
+      } finally {
+        if (active) setCustomerSearchLoading(false);
+      }
+    }, customerQuery.trim() ? 180 : 0);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [customerQuery, customerSearchOpen, notify]);
   useEffect(() => {
     if (!cameraOpen) return undefined;
     let stopped = false;
@@ -140,14 +166,14 @@ export default function POSPage() {
   const handleAddToCart = (product) => {
     const stockDisponible = product.stock_actual ?? product.stock ?? 0;
     if (stockDisponible <= 0) {
-      alert(`El producto "${product.nombre}" no tiene existencias disponibles.`);
+      notify(`El producto "${product.nombre}" no tiene existencias disponibles.`, 'warning');
       return false;
     }
 
     const exists = cart.find((item) => item.id === product.id);
     if (exists) {
       if (exists.qty + 1 > stockDisponible) {
-        alert(`Stock máximo disponible alcanzado (${stockDisponible} unidades).`);
+        notify(`Stock máximo disponible alcanzado (${stockDisponible} unidades).`, 'warning');
         return false;
       }
       setCart(cart.map((item) => (item.id === product.id ? { ...item, qty: item.qty + 1 } : item)));
@@ -232,7 +258,7 @@ export default function POSPage() {
           if (item.id === id) {
             const nextQty = item.qty + delta;
             if (nextQty > item.stockMax) {
-              alert(`Solo hay ${item.stockMax} unidades disponibles.`);
+              notify(`Solo hay ${item.stockMax} unidades disponibles.`, 'warning');
               return item;
             }
             return nextQty > 0 ? { ...item, qty: nextQty } : null;
@@ -262,7 +288,7 @@ export default function POSPage() {
     try {
       setProcessingSale(true);
       const result = await posService.crearVenta({
-        cliente: customer.trim() || 'Consumidor Final',
+        cliente_id: selectedClient?.id ?? null,
         metodo_pago: paymentMethod,
         items: cart.map((item) => ({ producto_id: item.id, cantidad: item.qty })),
       });
@@ -273,6 +299,9 @@ export default function POSPage() {
       });
       setReceiptOpen(false);
       setCart([]);
+      setSelectedClient(null);
+      setCustomerQuery('');
+      setCustomerSearchOpen(false);
       setPaymentModalOpen(false);
       setCashEntryOpen(false);
       setCardPaymentOpen(false);
@@ -282,7 +311,7 @@ export default function POSPage() {
       cargarProductos();
     } catch (err) {
       console.error('Error procesando venta:', err);
-      alert('Error al registrar la venta: ' + (err.response?.data?.detail || err.message));
+      notify('Error al registrar la venta: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setProcessingSale(false);
     }
@@ -388,9 +417,7 @@ export default function POSPage() {
 
           {/* Grid de Productos */}
           {loading ? (
-            <div className="hidden p-12 text-center text-sm text-on-surface-variant bg-surface-container-lowest rounded-xl shadow-sm lg:block">
-              Cargando productos de la base de datos...
-            </div>
+            <div className="hidden bg-surface-container-lowest rounded-xl shadow-sm lg:block"><SplashScreen compact message="Cargando productos para venta..." /></div>
           ) : filteredCatalog.length === 0 ? (
             <div className="hidden p-12 text-center text-sm text-on-surface-variant bg-surface-container-lowest rounded-xl shadow-sm lg:block">
               No se encontraron productos disponibles con ese criterio.
@@ -462,7 +489,7 @@ export default function POSPage() {
 
         {/* Carrito de Venta */}
         <div className="order-1 col-span-12 flex flex-col gap-4 lg:order-2 lg:col-span-5">
-          <div className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden flex flex-col">
+          <div className="relative overflow-visible rounded-xl bg-surface-container-lowest shadow-sm flex flex-col">
             <div className="p-4 bg-surface-container-low/50 flex flex-col gap-2 border-b border-surface-container-low">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-sm text-on-surface">Ticket Activo</span>
@@ -470,17 +497,30 @@ export default function POSPage() {
                   {totalItems} UDS
                 </span>
               </div>
-              <div className="flex items-center justify-between p-2 bg-surface-container-lowest rounded-lg">
-                <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary text-[20px]">person</span>
-                  <span className="text-xs font-semibold text-on-surface">{customer}</span>
+              <div className="flex items-center gap-2 rounded-lg bg-surface-container-lowest p-2">
+                <span className="material-symbols-outlined text-primary text-[20px]">person</span>
+                <div className="relative min-w-0 flex-1">
+                  <input
+                    aria-label="Buscar cliente para la factura"
+                    aria-expanded={customerSearchOpen}
+                    aria-controls="pos-client-results"
+                    role="combobox"
+                    autoComplete="off"
+                    placeholder="Buscar cliente o Consumidor Final"
+                    value={selectedClient ? selectedClient.nombre_cliente : customerQuery}
+                    onFocus={() => setCustomerSearchOpen(true)}
+                    onBlur={() => window.setTimeout(() => setCustomerSearchOpen(false), 120)}
+                    onChange={(event) => { setSelectedClient(null); setCustomerQuery(event.target.value); setCustomerSearchOpen(true); }}
+                    className="h-9 w-full rounded-md border border-surface-container-low bg-white px-2 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  {customerSearchOpen && <div id="pos-client-results" role="listbox" className="absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-y-auto rounded-xl border border-stone-200 bg-white p-1 shadow-xl">
+                    {customerSearchLoading ? <p className="px-3 py-2 text-xs text-on-surface-variant">Buscando clientes…</p> : customerOptions.length ? customerOptions.map((client) => <button key={client.id} type="button" role="option" aria-selected={selectedClient?.id === client.id} onMouseDown={(event) => event.preventDefault()} onClick={() => { setSelectedClient(client); setCustomerQuery(''); setCustomerSearchOpen(false); }} className="flex w-full flex-col items-start rounded-lg px-3 py-2 text-left hover:bg-primary-fixed/50">
+                      <span className="text-xs font-semibold text-on-surface">{client.nombre_cliente}</span>
+                      <span className="text-[11px] text-on-surface-variant">{[client.telefono, client.correo].filter(Boolean).join(' · ') || 'Sin datos de contacto'}</span>
+                    </button>) : <p className="px-3 py-2 text-xs text-on-surface-variant">No hay coincidencias. Puedes registrar al cliente en el módulo Clientes.</p>}
+                  </div>}
                 </div>
-                <input
-                  aria-label="Nombre del cliente para la factura"
-                  value={customer}
-                  onChange={(event) => setCustomer(event.target.value)}
-                  className="max-w-48 rounded-md border border-surface-container-low bg-white px-2 py-1 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
-                />
+                {selectedClient ? <button type="button" onClick={() => { setSelectedClient(null); setCustomerQuery(''); }} className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold text-on-surface-variant hover:bg-surface-container-low">Quitar</button> : <span className="shrink-0 text-[11px] text-on-surface-variant">{customerQuery.trim() ? 'Sin seleccionar' : 'Consumidor Final'}</span>}
               </div>
             </div>
 

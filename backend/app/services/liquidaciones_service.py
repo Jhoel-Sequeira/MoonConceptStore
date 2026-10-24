@@ -193,7 +193,7 @@ class LiquidacionesService:
         ws.title = "Liquidacion_Marca"
         ws.sheet_view.showGridLines = False
         ws.freeze_panes = "A11"
-        rose, pink, blush, gold = "E9B7C3", "F7D1D6", "F3E2D9", "C9A46D"
+        rose, pink, blush, gold = "FFFFFF", "FFFFFF", "FFFFFF", "C9A46D"
         white, ink, muted, line = "FFFFFF", "493A35", "786963", "E8D8D1"
         zebra, gold_light = "FFFAF8", "F8F0E4"
         border = Border(*(Side(style="thin", color=line) for _ in range(4)))
@@ -302,7 +302,7 @@ class LiquidacionesService:
         headers = ["#", "SKU / CÓDIGO", "PRODUCTO", "UNIDADES", "VENTAS BRUTAS", "EFECTIVO", "TARJETA", "TRANSFERENCIA", "COMISIÓN POS", "TIENDA 20%", "NETO MARCA"]
         for column, label in enumerate(headers, start=1):
             cell = ws.cell(10, column, label)
-            cell.font = Font(name="Segoe UI", size=9, bold=True, color=white)
+            cell.font = Font(name="Segoe UI", size=9, bold=True, color=white if column >= 5 else ink)
             cell.fill = PatternFill("solid", fgColor=gold if column >= 5 else rose)
             cell.border = border
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)

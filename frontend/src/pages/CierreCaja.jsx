@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { formatCordobas, formatCordobaDifference } from '../utils/currency';
 import finanzasService from '../services/finanzasService';
+import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
 
 const fields = [
   { key: 'efectivo', label: 'Efectivo', icon: 'payments' },
@@ -9,6 +10,7 @@ const fields = [
 ];
 
 export default function CierreCajaPage() {
+  const { confirm, notify } = useFeedback();
   const [cierre, setCierre] = useState(null);
   const [fondo, setFondo] = useState('');
   const [contado, setContado] = useState({ efectivo: '', tarjeta: '', transferencia: '' });
@@ -45,7 +47,7 @@ export default function CierreCajaPage() {
 
   const submit = async (event) => {
     event.preventDefault();
-    if (!window.confirm('¿Confirmas el cierre de caja? No se podrán registrar más ventas hoy.')) return;
+    if (!(await confirm('¿Confirmas el cierre de caja? No se podrán registrar más ventas hoy.', { title: 'Cerrar caja', confirmLabel: 'Confirmar cierre' }))) return;
     setSaving(true);
     setError('');
     try {
@@ -57,6 +59,7 @@ export default function CierreCajaPage() {
         observaciones: observaciones.trim() || null,
       });
       setCierre(result);
+      notify('La caja quedó cerrada por hoy.', 'success');
     } catch (err) {
       setError(err.response?.data?.detail || 'No se pudo cerrar la caja.');
     } finally {
@@ -78,7 +81,7 @@ export default function CierreCajaPage() {
       </div>
 
       {error && <div role="alert" className="p-3 rounded-lg bg-error-container text-error text-sm">{error}</div>}
-      {loading ? <p className="text-on-surface-variant">Cargando movimientos de hoy…</p> : cierre && (
+      {loading ? <SplashScreen compact message="Cargando movimientos de caja..." /> : cierre && (
         <form onSubmit={submit} className="flex flex-col gap-5">
           <section className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
             <div className="p-5 border-b border-surface-container-low">
