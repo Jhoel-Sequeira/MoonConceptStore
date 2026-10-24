@@ -37,7 +37,7 @@ export const marcasService = {
     return response.data;
   },
 
-  downloadFichaEntrega: async (id, brandName = 'marca') => {
+  downloadFichaEntrega: async (id, brandName = 'marca', category = 'rubro') => {
     const response = await api.get(`/marcas/${id}/ficha-entrega`, {
       responseType: 'blob',
     });
@@ -46,8 +46,9 @@ export const marcasService = {
     });
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
+    const fileParts = [category, brandName].map((part) => String(part || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, ''));
     link.href = url;
-    link.setAttribute('download', `Plantilla_Inventario_${brandName.replace(/\s+/g, '_')}.xlsx`);
+    link.setAttribute('download', `Plantilla_Inventario_${fileParts.join('_')}.xlsx`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

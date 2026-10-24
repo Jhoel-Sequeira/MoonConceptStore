@@ -139,8 +139,11 @@ def import_marca_products(
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Selecciona una plantilla Excel .xlsx")
     try:
+        content = file.file.read(32 * 1024 * 1024 + 1)
+        if len(content) > 32 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="La plantilla no puede superar 32 MB")
         result = MarcasService.import_delivery_template(
-            db, marca_id, file.file.read(), current_user.id, file.filename
+            db, marca_id, content, current_user.id, file.filename
         )
         pdf = result.pop("qr_pdf")
         filename = result.pop("qr_pdf_filename")
@@ -157,6 +160,9 @@ def import_marca_products(
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"No se pudo importar la plantilla: {exc}") from exc

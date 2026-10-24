@@ -1,0 +1,9 @@
+# Backend notes
+
+- Caja diaria uses the `America/Managua` business date. Keep its UTC boundary conversion and advisory lock shared by sale creation and closure so a sale cannot race a close.
+- Monthly brand settlements use a fixed 20% store commission on product subtotals. The terminal's 5% POS charge is reported separately and does not reduce the brand payout.
+- Only completed months can be settled. A settlement is unique per brand and month; a payment must retain its date and transfer reference.
+- Brand rent uses a per-brand monthly configuration and explicit per-month generation. Each generated charge is unique per brand and month, charges the full monthly amount in the start month, snapshots the configured amount, and records partial payments with date and reference.
+- The monthly report includes sales by day, brand, product, and payment method, plus comparison with the previous month. POS fees are allocated back to brands and products proportionally in cents.
+- Settlement exports are selected by brand and month as a single XLSX statement. Preserve the inventory template's rose, blush, and gold layout, brand metadata, per-product/payment-method detail, totals, POS fee, store commission, net payout, and settlement status; use brand initials if its optional logo is unavailable.
+- Sales history is exposed at `GET /api/v1/pos/ventas/historial`; keep its date filters in the Managua business timezone, and preserve brand, payment-method, customer/product search, pagination, and sale-item detail.

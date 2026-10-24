@@ -1,7 +1,7 @@
 import urllib.request
 import json
 
-base_url = "http://localhost:8000/api/v1/marcas"
+base_url = "http://localhost:8001/api/v1/marcas"
 
 # Obtener primera marca existente
 req = urllib.request.Request(f"{base_url}/")

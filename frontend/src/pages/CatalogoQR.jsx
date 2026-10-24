@@ -128,6 +128,8 @@ export default function CatalogoQRPage() {
   };
 
   const handleOpenEdit = (product) => {
+    const productDetails = product.detalles_rubro || {};
+    const { talla: legacySize, tamano: legacyDimensions, ...categoryDetails } = productDetails;
     setProductToEdit(product);
     setPhotoFiles([]);
     setRemovedPhotoUrls([]);
@@ -138,8 +140,8 @@ export default function CatalogoQRPage() {
       marca_id: product.marca_id,
       precio: product.precio,
       descripcion: product.descripcion || '',
-      tamano: product.tamano || '',
-      detalles_rubro: product.detalles_rubro || {},
+      tamano: product.tamano || legacySize || legacyDimensions || '',
+      detalles_rubro: categoryDetails,
       imagen_url: product.imagen_url || '',
       estado_id: product.estado_id ?? 1,
       stock_inicial: product.stock_actual,
@@ -295,6 +297,9 @@ export default function CatalogoQRPage() {
   const activePhotoIndex = activePhoto.startsWith('file:')
     ? storedPhotoUrls.length + Number(activePhoto.slice(5))
     : Math.max(0, visiblePhotoUrls.indexOf(activePhoto || formData.imagen_url));
+  const selectedBrand = marcas.find((brand) => String(brand.id) === String(formData.marca_id));
+  const categoryFields = RUBRO_FIELDS[selectedBrand?.categoria] || [];
+  const categoryHasSizeField = categoryFields.some(([key]) => key === 'talla' || key === 'tamano');
 
   return (
     <div className="flex flex-col w-full gap-space-lg">
@@ -657,22 +662,23 @@ export default function CatalogoQRPage() {
                       <option value="">Selecciona una marca</option>{marcas.map((brand) => <option key={brand.id} value={brand.id}>{brand.nombre_marca}</option>)}
                     </select>
                   </label>
-                  {(() => {
-                    const selectedBrand = marcas.find((brand) => String(brand.id) === String(formData.marca_id));
-                    const categoryFields = RUBRO_FIELDS[selectedBrand?.categoria] || [];
-                    return categoryFields.length > 0 && (
-                      <fieldset className="rounded-lg border border-outline-variant/30 p-3">
-                        <legend className="px-1 text-xs font-semibold text-on-surface-variant">Detalles · {selectedBrand.categoria}</legend>
-                        <div className="grid grid-cols-2 gap-3">
-                          {categoryFields.map(([key, label]) => (
+                  {categoryFields.length > 0 && (
+                    <fieldset className="rounded-lg border border-outline-variant/30 p-3">
+                      <legend className="px-1 text-xs font-semibold text-on-surface-variant">Detalles · {selectedBrand.categoria}</legend>
+                      <div className="grid grid-cols-2 gap-3">
+                        {categoryFields.map(([key, label]) => {
+                          const isSizeField = key === 'talla' || key === 'tamano';
+                          return (
                             <label key={key} className="block text-xs font-medium text-on-surface-variant">{label}
-                              <input maxLength={2000} value={formData.detalles_rubro?.[key] || ''} onChange={(event) => setFormData({ ...formData, detalles_rubro: { ...formData.detalles_rubro, [key]: event.target.value } })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
+                              <input maxLength={2000} value={isSizeField ? formData.tamano : formData.detalles_rubro?.[key] || ''} onChange={(event) => setFormData(isSizeField
+                                ? { ...formData, tamano: event.target.value }
+                                : { ...formData, detalles_rubro: { ...formData.detalles_rubro, [key]: event.target.value } })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
                             </label>
-                          ))}
-                        </div>
-                      </fieldset>
-                    );
-                  })()}
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-xs font-medium text-on-surface-variant">Precio de venta (C$)
                       <input required type="number" min="0.01" step="0.01" value={formData.precio} onChange={(event) => setFormData({ ...formData, precio: event.target.value })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
@@ -685,9 +691,9 @@ export default function CatalogoQRPage() {
                     <label className="block text-xs font-medium text-on-surface-variant">Stock cr?tico
                       <input type="number" min="0" value={formData.stock_critico} onChange={(event) => setFormData({ ...formData, stock_critico: event.target.value })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
                     </label>
-                    <label className="block text-xs font-medium text-on-surface-variant">Talla / presentación
+                    {!categoryHasSizeField && <label className="block text-xs font-medium text-on-surface-variant">Talla / tamaño / variante
                       <input value={formData.tamano} onChange={(event) => setFormData({ ...formData, tamano: event.target.value })} placeholder="Opcional" className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
-                    </label>
+                    </label>}
                   </div>
                   <label className="block text-xs font-medium text-on-surface-variant">Descripción
                     <input value={formData.descripcion} onChange={(event) => setFormData({ ...formData, descripcion: event.target.value })} placeholder="Descripción o variante" className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
@@ -13,6 +14,7 @@ from app.core.database import get_db
 from app.models.usuarios import Usuario
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
@@ -29,6 +31,7 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
             or_(Usuario.email.ilike(identifier), Usuario.usuario.ilike(identifier))
         ).first()
     except OperationalError as exc:
+        logger.error("Falló la consulta de usuarios durante el login: %s", exc.orig)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="No hay conexión con la base de datos. Revisa DATABASE_URL en backend/.env y reinicia el backend.",

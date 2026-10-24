@@ -23,7 +23,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Push-Location $BackendDir
 try {
-    & $VenvPython -m uvicorn main:app --reload
+    & $VenvPython -m uvicorn main:app --reload --host 127.0.0.1 --port 8001 --access-log
     if ($LASTEXITCODE -ne 0) { throw 'Uvicorn terminó con un error.' }
 }
 finally {

@@ -29,5 +29,7 @@ class VentaResponse(BaseModel):
     fecha_venta: str
     cliente: str
     metodo_pago: str
+    subtotal: Decimal
+    comision_pos: Decimal
     total: Decimal
     items: List[VentaDetalleResponse]

@@ -1,17 +1,114 @@
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import text
+from fastapi import HTTPException
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from app.models.inventario import Kardex, Producto
 from app.schemas.pos import VentaCreate
+from app.services.cierre_caja_service import business_day, lock_day
+from app.services.cierre_caja_service import MANAGUA, utc_naive_bounds
 from app.services.inventario_service import InventarioService
 
 
 CENT = Decimal("0.01")
+CARD_COMMISSION_RATE = Decimal("0.05")
 
 
 class POSService:
+    @staticmethod
+    def list_sales(
+        db: Session,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        brand_id: int | None = None,
+        payment_method: str | None = None,
+        search: str | None = None,
+        page: int = 1,
+        page_size: int = 25,
+    ) -> dict:
+        if start_date and end_date and start_date > end_date:
+            raise HTTPException(status_code=422, detail="La fecha inicial no puede ser posterior a la final.")
+        clauses = ["e.modulo = 'ventas'", "e.nombre = 'Facturada'"]
+        params = {}
+        if start_date:
+            start_bound, _ = utc_naive_bounds(start_date, start_date + timedelta(days=1))
+            clauses.append("v.fecha_venta >= :start_bound")
+            params["start_bound"] = start_bound
+        if end_date:
+            _, end_bound = utc_naive_bounds(end_date, end_date + timedelta(days=1))
+            clauses.append("v.fecha_venta < :end_bound")
+            params["end_bound"] = end_bound
+        if brand_id:
+            clauses.append("EXISTS (SELECT 1 FROM venta_detalles x JOIN productos px ON px.id = x.producto_id WHERE x.venta_id = v.id AND px.marca_id = :brand_id)")
+            params["brand_id"] = brand_id
+        if payment_method:
+            clauses.append("lower(trim(mp.metodo_pago)) = lower(trim(:payment_method))")
+            params["payment_method"] = payment_method
+        if search and search.strip():
+            clauses.append("""(
+                v.id::text ILIKE :search OR c.nombre_cliente ILIKE :search OR EXISTS (
+                    SELECT 1 FROM venta_detalles sx JOIN productos sp ON sp.id = sx.producto_id
+                    WHERE sx.venta_id = v.id AND (sp.nombre ILIKE :search OR COALESCE(sp.sku, '') ILIKE :search)
+                )
+            )""")
+            params["search"] = f"%{search.strip()}%"
+        where = " AND ".join(clauses)
+        from_sql = """
+            FROM ventas v
+            JOIN estados e ON e.id = v.estado_id
+            LEFT JOIN clientes c ON c.id = v.cliente_id
+            LEFT JOIN metodo_pago mp ON mp.id = v.metodo_pago_id
+        """
+        summary = db.execute(text(f"""
+            SELECT count(*) AS transacciones,
+                   COALESCE(sum(v.total), 0) AS total_cobrado,
+                   COALESCE(sum(v.total - v.comision_pos), 0) AS ventas_productos,
+                   COALESCE(sum(v.comision_pos), 0) AS comision_pos
+            {from_sql} WHERE {where}
+        """), params).mappings().one()
+        sales = db.execute(text(f"""
+            SELECT v.id, v.fecha_venta, COALESCE(c.nombre_cliente, 'Consumidor Final') AS cliente,
+                   COALESCE(mp.metodo_pago, 'Sin método') AS metodo_pago,
+                   v.total, v.comision_pos, v.total - v.comision_pos AS subtotal
+            {from_sql} WHERE {where}
+            ORDER BY v.fecha_venta DESC, v.id DESC
+            LIMIT :limit OFFSET :offset
+        """), {**params, "limit": page_size, "offset": (page - 1) * page_size}).mappings().all()
+        sale_ids = [row["id"] for row in sales]
+        items_by_sale = {sale_id: [] for sale_id in sale_ids}
+        if sale_ids:
+            item_rows = db.execute(text("""
+                SELECT vd.venta_id, vd.producto_id, p.nombre AS producto, p.sku,
+                       m.id AS marca_id, m.nombre_marca AS marca,
+                       vd.cantidad, vd.precio_unitario, vd.subtotal
+                FROM venta_detalles vd
+                JOIN productos p ON p.id = vd.producto_id
+                JOIN marcas m ON m.id = p.marca_id
+                WHERE vd.venta_id IN :sale_ids
+                ORDER BY vd.venta_id, m.nombre_marca, p.nombre
+            """).bindparams(bindparam("sale_ids", expanding=True)), {"sale_ids": sale_ids}).mappings().all()
+            for item in item_rows:
+                items_by_sale[item["venta_id"]].append({
+                    "producto_id": item["producto_id"], "producto": item["producto"],
+                    "sku": item["sku"], "marca_id": item["marca_id"], "marca": item["marca"],
+                    "cantidad": item["cantidad"], "precio_unitario": item["precio_unitario"], "subtotal": item["subtotal"],
+                })
+        return {
+            "pagina": page, "por_pagina": page_size, "total": int(summary["transacciones"]),
+            "resumen": dict(summary),
+            "ventas": [{
+                "id": row["id"],
+                "fecha_venta": row["fecha_venta"].replace(tzinfo=timezone.utc).astimezone(MANAGUA).isoformat() if row["fecha_venta"] else None,
+                "cliente": row["cliente"], "metodo_pago": row["metodo_pago"],
+                "total": row["total"], "subtotal": row["subtotal"], "comision_pos": row["comision_pos"],
+                "unidades": sum(int(item["cantidad"]) for item in items_by_sale[row["id"]]),
+                "marcas": sorted({item["marca"] for item in items_by_sale[row["id"]]}, key=str.casefold),
+                "items": items_by_sale[row["id"]],
+            } for row in sales],
+        }
+
     @staticmethod
     def create_sale(db: Session, sale_in: VentaCreate, user_id: int) -> dict:
         # Consolidate repeated scans of the same QR into one invoice line.
@@ -20,6 +117,13 @@ class POSService:
             quantities[item.producto_id] = quantities.get(item.producto_id, 0) + item.cantidad
 
         try:
+            sale_day = business_day()
+            lock_day(db, sale_day)
+            if db.execute(
+                text("SELECT 1 FROM cierres_caja WHERE fecha = :day"), {"day": sale_day}
+            ).first():
+                raise ValueError("La caja de hoy ya fue cerrada. Las ventas se habilitarán mañana.")
+
             products = (
                 db.query(Producto)
                 .filter(Producto.id.in_(quantities.keys()))
@@ -62,6 +166,14 @@ class POSService:
             if not payment:
                 raise ValueError("El método de pago seleccionado no está configurado")
 
+            subtotal = total
+            commission = (
+                (subtotal * CARD_COMMISSION_RATE).quantize(CENT, rounding=ROUND_HALF_UP)
+                if payment.metodo_pago.strip().casefold() == "tarjeta"
+                else Decimal("0.00")
+            )
+            total = subtotal + commission
+
             customer_name = sale_in.cliente.strip() or "Consumidor Final"
             customer_id = db.execute(
                 text("SELECT id FROM clientes WHERE lower(trim(nombre_cliente)) = lower(:name) ORDER BY id LIMIT 1"),
@@ -82,7 +194,7 @@ class POSService:
             sale_id = db.execute(
                 text("""
                     INSERT INTO ventas (usuario_id, cliente_id, metodo_pago_id, total, comision_pos, estado_id)
-                    VALUES (:user_id, :customer_id, :payment_id, :total, 0, :state_id)
+                    VALUES (:user_id, :customer_id, :payment_id, :total, :commission, :state_id)
                     RETURNING id
                 """),
                 {
@@ -90,6 +202,7 @@ class POSService:
                     "customer_id": customer_id,
                     "payment_id": payment.id,
                     "total": total,
+                    "commission": commission,
                     "state_id": invoice_state_id,
                 },
             ).scalar_one()
@@ -136,6 +249,8 @@ class POSService:
                 "fecha_venta": sale_date.isoformat() if sale_date else "",
                 "cliente": customer_name,
                 "metodo_pago": payment.metodo_pago,
+                "subtotal": subtotal,
+                "comision_pos": commission,
                 "total": total,
                 "items": lines,
             }

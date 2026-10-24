@@ -4,7 +4,12 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 import io
+import logging
 import os
+import posixpath
+from urllib.parse import urlparse
+import zipfile
+import xml.etree.ElementTree as ET
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -16,8 +21,91 @@ from app.models.marcas import Marca, Cuenta
 from app.models.inventario import Kardex, Producto
 from app.models.ingresos import Ingreso, IngresoDetalle
 from app.schemas.marcas import MarcaCreate, MarcaUpdate
-from app.core.storage import download_image
-from app.core.categories import normalize_category
+from app.core.storage import delete_image, download_image, upload_image
+from app.core.categories import CATEGORY_FIELDS, normalize_category, validate_category_details
+
+DELIVERY_TEMPLATE_VERSION = 6
+DELIVERY_BASE_HEADERS = (
+    "#", "SKU / CÓDIGO *", "NOMBRE * SI ES NUEVO", "DESCRIPCIÓN",
+    "PRECIO VENTA C$ * SI ES NUEVO", "CANTIDAD RECIBIDA *", "URL / IMAGEN",
+)
+logger = logging.getLogger(__name__)
+
+
+def _extract_in_cell_images(file_bytes: bytes, sheet_name: str, row_start: int, row_end: int) -> dict:
+    """Read Excel's OOXML rich-data images, which openpyxl exposes as #VALUE! cells."""
+    main_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    office_rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    package_rel_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    rich_ns = "http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+    rich_rel_ns = "http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel"
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
+            names = set(archive.namelist())
+            required = {"xl/workbook.xml", "xl/_rels/workbook.xml.rels", "xl/metadata.xml",
+                        "xl/richData/rdrichvalue.xml", "xl/richData/richValueRel.xml",
+                        "xl/richData/_rels/richValueRel.xml.rels"}
+            if not required.issubset(names):
+                return {}
+
+            workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+            workbook_rels = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+            relation_targets = {rel.get("Id"): rel.get("Target") for rel in workbook_rels}
+            sheet = next(item for item in workbook.find(f"{{{main_ns}}}sheets")
+                         if item.get("name") == sheet_name)
+            target = relation_targets[sheet.get(f"{{{office_rel_ns}}}id")]
+            sheet_path = target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join("xl", target))
+            sheet_xml = ET.fromstring(archive.read(sheet_path))
+            row_vm = {}
+            for cell in sheet_xml.iter(f"{{{main_ns}}}c"):
+                coordinate = cell.get("r", "")
+                if coordinate.startswith("G") and coordinate[1:].isdigit():
+                    row_num = int(coordinate[1:])
+                    if row_start <= row_num <= row_end and cell.get("vm"):
+                        row_vm[row_num] = int(cell.get("vm")) - 1
+
+            metadata = ET.fromstring(archive.read("xl/metadata.xml"))
+            value_metadata = metadata.find(f"{{{main_ns}}}valueMetadata")
+            future_metadata = next(item for item in metadata.findall(f"{{{main_ns}}}futureMetadata")
+                                   if item.get("name") == "XLRICHVALUE")
+            value_entries = list(value_metadata) if value_metadata is not None else []
+            future_entries = list(future_metadata)
+            rich_values = ET.fromstring(archive.read("xl/richData/rdrichvalue.xml"))
+            rich_entries = list(rich_values)
+            rich_value_rels = ET.fromstring(archive.read("xl/richData/richValueRel.xml"))
+            rel_ids = [item.get(f"{{{office_rel_ns}}}id") for item in rich_value_rels.findall(f"{{{rich_rel_ns}}}rel")]
+            image_rels = ET.fromstring(archive.read("xl/richData/_rels/richValueRel.xml.rels"))
+            image_targets = {rel.get("Id"): rel.get("Target") for rel in image_rels.findall(f"{{{package_rel_ns}}}Relationship")}
+
+            images = {}
+            for row_num, vm_index in row_vm.items():
+                if not 0 <= vm_index < len(value_entries):
+                    continue
+                rc = next((item for item in value_entries[vm_index] if item.tag.endswith("}rc")), None)
+                if rc is None:
+                    continue
+                future_index = int(rc.get("v", "-1"))
+                if not 0 <= future_index < len(future_entries):
+                    continue
+                rvb = next((node for node in future_entries[future_index].iter() if node.tag.endswith("}rvb")), None)
+                if rvb is None:
+                    continue
+                rich_index = int(rvb.get("i", "-1"))
+                if not 0 <= rich_index < len(rich_entries):
+                    continue
+                values = [node.text for node in rich_entries[rich_index].findall(f"{{{rich_ns}}}v")]
+                if not values:
+                    continue
+                rel_index = int(values[0])
+                if not 0 <= rel_index < len(rel_ids):
+                    continue
+                image_target = image_targets.get(rel_ids[rel_index], "")
+                image_path = posixpath.normpath(posixpath.join("xl/richData", image_target))
+                if image_path.startswith("xl/media/") and image_path in names:
+                    images[row_num] = archive.read(image_path)
+            return images
+    except (KeyError, StopIteration, ValueError, ET.ParseError, zipfile.BadZipFile):
+        return {}
 
 class MarcasService:
     @staticmethod
@@ -227,6 +315,12 @@ class MarcasService:
         if not marca:
             return None, None
 
+        category = normalize_category(marca.categoria)
+        category_fields = CATEGORY_FIELDS.get(category, ())
+        headers = [*DELIVERY_BASE_HEADERS, *(label.upper() for _, label in category_fields)]
+        category_start_col = len(DELIVERY_BASE_HEADERS) + 1
+        last_col = len(headers)
+
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Plantilla_Inventario"
@@ -246,10 +340,11 @@ class MarcasService:
         input_fill = "FFF3F4"
         gold_light = "F8F0E4"
         border = Border(*(Side(style="thin", color=line) for _ in range(4)))
-        widths = {"A": 7, "B": 20, "C": 32, "D": 38, "E": 20,
-                  "F": 18, "G": 20, "H": 19, "I": 18, "J": 38}
+        widths = {"A": 7, "B": 20, "C": 32, "D": 38, "E": 22, "F": 20, "G": 38}
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
+        for col in range(category_start_col, last_col + 1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 24
 
         ws.row_dimensions[1].height = 10
         ws.row_dimensions[2].height = 36
@@ -258,7 +353,12 @@ class MarcasService:
         ws.merge_cells("A2:A3")
         logo_inserted = False
         if getattr(marca, "logo", None):
-            logo_content = download_image(marca.logo)
+            # ponytail: el logo es decorativo; si Storage falla, las iniciales mantienen descargable la ficha.
+            try:
+                logo_content = download_image(marca.logo)
+            except Exception:
+                logger.warning("No se pudo descargar el logo de la marca %s; se generará la ficha con sus iniciales", marca.id, exc_info=True)
+                logo_content = None
             if logo_content is None:
                 clean_logo = marca.logo.lstrip("/").replace("/", os.sep)
                 if os.path.exists(clean_logo):
@@ -283,11 +383,11 @@ class MarcasService:
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
         ws.merge_cells("B2:G2")
-        ws["B2"] = f"CATÁLOGO DE PRODUCTOS · {marca.nombre_marca.upper()}"
+        ws["B2"] = f"PLANTILLA DE ENTREGA · {category.upper()}"
         ws["B2"].font = Font(name="Segoe UI", size=16, bold=True, color=ink)
         ws["B2"].alignment = Alignment(vertical="center")
         ws.merge_cells("B3:G3")
-        ws["B3"] = "Plantilla de alta de productos y recepción de stock inicial"
+        ws["B3"] = f"Inventario para {marca.nombre_marca} · {marca.codigo or 'MARCA'}"
         ws["B3"].font = Font(name="Segoe UI", size=10, color=muted)
         ws["B3"].alignment = Alignment(vertical="center")
         ws.merge_cells("H2:J2")
@@ -331,49 +431,43 @@ class MarcasService:
         ws.merge_cells("E7:F7")
         ws.merge_cells("H7:J7")
 
-        ws.merge_cells("A9:J9")
-        ws["A9"] = "Completa SKU y cantidad recibida. Para productos nuevos también se necesita nombre y precio de venta."
+        ws.merge_cells(start_row=9, start_column=1, end_row=9, end_column=max(10, last_col))
+        ws["A9"] = f"Completa SKU y cantidad recibida. Para productos nuevos también se necesita nombre y precio de venta. Campos de {category}: completa los que apliquen."
         ws["A9"].font = Font(name="Segoe UI", size=9, bold=True, color=ink)
         ws["A9"].fill = PatternFill("solid", fgColor=blush)
         ws["A9"].alignment = Alignment(vertical="center", wrap_text=True)
         ws.row_dimensions[9].height = 25
 
-        headers = ["#", "SKU / CÓDIGO *", "NOMBRE * SI ES NUEVO", "DESCRIPCIÓN", "TALLA / VARIANTE",
-                   "PRECIO VENTA C$ * SI ES NUEVO", "CANTIDAD RECIBIDA *", "COSTO UNIT. C$", "STOCK CRÍTICO", "URL DE IMAGEN"]
         for col, title in enumerate(headers, start=1):
             c = ws.cell(10, col, title)
             c.font = Font(name="Segoe UI", size=9, bold=True, color=white)
-            c.fill = PatternFill("solid", fgColor=gold if col in (6, 7) else rose)
+            c.fill = PatternFill("solid", fgColor=gold if col in (5, 6) else (pink if col >= category_start_col else rose))
             c.border = border
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             c.comment = Comment({
                 2: "Obligatorio y único por fila. Si ya existe en esta marca, la cantidad recibida se suma al stock. Si pertenece a otra marca, no se importa.",
                 3: "Obligatorio para productos nuevos. Si el SKU ya existe en esta marca, se conservan los datos del producto.",
                 4: "Detalle útil: material, color, modelo o contenido del paquete.",
-                5: "Talla, tamaño o variante; se guarda en el campo de variante del producto.",
-                6: "Obligatorio para productos nuevos. Precio de venta en cordobas nicaraguenses; admite decimales, sin simbolo.",
-                7: "Obligatorio. Cantidad física recibida, entero mayor que cero. Se suma al stock actual del producto.",
-                8: "Opcional. Costo unitario en cordobas nicaraguenses, sin simbolo.",
-                9: "Opcional. Umbral para alertas de stock bajo; si se deja vacío, se usa 5.",
-                10: "Opcional. URL pública de la imagen del producto.",
+                5: "Obligatorio para productos nuevos. Precio de venta en córdobas; admite decimales.",
+                6: "Obligatorio. Cantidad física recibida, entero mayor que cero; se suma al stock actual.",
+                7: "Opcional. Pega un URL público o inserta una imagen en esta fila; puedes usar ambos.",
             }.get(col, "Número consecutivo automático; no editar."), "Sistema")
+            if col >= category_start_col:
+                c.comment = Comment(f"Campo específico del rubro {category}. Opcional.", "Sistema")
         ws.row_dimensions[10].height = 38
 
         start_row, end_row = 11, 40
         for idx, r in enumerate(range(start_row, end_row + 1), start=1):
             ws.row_dimensions[r].height = 24
             ws.cell(r, 1, idx)
-            for col in range(1, 11):
+            for col in range(1, len(headers) + 1):
                 c = ws.cell(r, col)
                 c.border = border
-                c.alignment = Alignment(vertical="center", wrap_text=col in (3, 4, 10))
+                c.alignment = Alignment(vertical="center", wrap_text=col in (3, 4, 7) or col >= category_start_col)
                 c.font = Font(name="Segoe UI", size=9, color=muted if col == 1 else ink)
-                c.fill = PatternFill("solid", fgColor=(input_fill if col in range(2, 11) else (white if idx % 2 else zebra)))
-            for col in (6, 8):
-                ws.cell(r, col).number_format = '"C$"#,##0.00'
-            ws.cell(r, 7).number_format = "0"
-            ws.cell(r, 9, 5)
-            ws.cell(r, 9).number_format = "0"
+                c.fill = PatternFill("solid", fgColor=(input_fill if col >= 2 else (white if idx % 2 else zebra)))
+            ws.cell(r, 5).number_format = '"C$"#,##0.00'
+            ws.cell(r, 6).number_format = "0"
 
         ws.conditional_formatting.add(
             f"B{start_row}:B{end_row}",
@@ -384,26 +478,20 @@ class MarcasService:
             ),
         )
 
-        ws.auto_filter.ref = f"A10:J{end_row}"
+        ws.auto_filter.ref = f"A10:{openpyxl.utils.get_column_letter(len(headers))}{end_row}"
         dv_text = DataValidation(type="textLength", operator="lessThanOrEqual", formula1="100", allow_blank=True)
         dv_name = DataValidation(type="textLength", operator="lessThanOrEqual", formula1="255", allow_blank=True)
-        # El precio es obligatorio para productos nuevos; los existentes solo
-        # requieren SKU y cantidad para recibir más unidades.
         dv_price = DataValidation(type="decimal", operator="greaterThan", formula1="0", allow_blank=True)
-        dv_cost = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
         dv_qty = DataValidation(type="whole", operator="greaterThan", formula1="0", allow_blank=False)
-        dv_critical = DataValidation(type="whole", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
-        for dv in (dv_text, dv_name, dv_price, dv_cost, dv_qty, dv_critical):
+        for dv in (dv_text, dv_name, dv_price, dv_qty):
             dv.errorTitle = "Dato no válido"
             dv.error = "Revisa el valor y las instrucciones de la plantilla."
             dv.showErrorMessage = True
             ws.add_data_validation(dv)
         dv_text.add(f"B{start_row}:B{end_row}")
         dv_name.add(f"C{start_row}:C{end_row}")
-        dv_price.add(f"F{start_row}:F{end_row}")
-        dv_qty.add(f"G{start_row}:G{end_row}")
-        dv_cost.add(f"H{start_row}:H{end_row}")
-        dv_critical.add(f"I{start_row}:I{end_row}")
+        dv_price.add(f"E{start_row}:E{end_row}")
+        dv_qty.add(f"F{start_row}:F{end_row}")
         ws.sheet_properties.pageSetUpPr.fitToPage = True
         ws.page_setup.fitToWidth = 1
         ws.page_setup.fitToHeight = 0
@@ -416,7 +504,7 @@ class MarcasService:
         guide.column_dimensions["B"].width = 29
         guide.column_dimensions["C"].width = 100
         guide.merge_cells("B2:C2")
-        guide["B2"] = f"GUÍA DE CARGA — {marca.nombre_marca.upper()}"
+        guide["B2"] = f"GUÍA DE CARGA — {category.upper()} · {marca.nombre_marca.upper()}"
         guide["B2"].font = Font(name="Segoe UI", size=15, bold=True, color=ink)
         guide["B2"].fill = PatternFill("solid", fgColor=pink)
         guide["B2"].alignment = Alignment(vertical="center")
@@ -426,12 +514,10 @@ class MarcasService:
             ("SKU / Código *", "Escribe el SKU del producto. Si ya existe en esta marca, la cantidad se suma al stock; si pertenece a otra marca, la carga se rechaza."),
             ("Nombre *", "Obligatorio para productos nuevos. Para un SKU existente de esta marca puedes dejarlo vacío; los datos actuales del producto se conservan."),
             ("Descripción", "Agrega material, color, contenido del paquete, modelo u otra información que ayude a distinguirlo."),
-            ("Talla / Variante", "Talla o variante del producto (por ejemplo: S, 10 cm, color rosa)."),
             ("Precio venta en C$ *", "Obligatorio para productos nuevos. Para un producto existente puedes dejarlo vacío; el precio actual se conserva."),
             ("Cantidad recibida *", "Cantidad física entregada, como entero mayor que cero. En productos existentes se suma al stock actual."),
-            ("Costo unitario en C$", "Opcional. Costo por unidad en cordobas nicaraguenses, solo numero decimal. No escribas moneda ni separador de miles."),
-            ("Stock crítico", "Opcional. Umbral de alerta de stock bajo; el valor predeterminado es 5."),
-            ("URL de imagen", "Opcional. Debe ser un enlace público a la imagen del artículo."),
+            ("URL / imagen", "Opcional. Pega un URL público en la columna o inserta una imagen en cualquier celda de la misma fila. Puedes proporcionar ambos."),
+            ("Campos del rubro", ", ".join(label for _, label in category_fields) or "Sin campos específicos"),
             ("Antes de importar", "Completa una fila por SKU y cantidad recibida. No cambies el nombre de las hojas, encabezados ni estructura. Elimina filas de ejemplo vacías si agregaste datos fuera de las filas preparadas."),
             ("Resultado", "El sistema valida todo el archivo antes de guardar. Los SKU existentes de esta marca reciben más stock; los nuevos se crean. Si un SKU pertenece a otra marca o hay datos inválidos, no se aplica la carga."),
             ("Campos automáticos", "La marca, el identificador, el código QR y el estado activo los asigna el sistema. No hace falta escribirlos en esta plantilla."),
@@ -449,8 +535,8 @@ class MarcasService:
 
         meta = wb.create_sheet("_plantilla")
         for row, (key, value) in enumerate([
-            ("marca_id", marca.id), ("marca_codigo", marca.codigo or ""), ("version", 2),
-            ("data_start", start_row), ("data_end", end_row),
+            ("marca_id", marca.id), ("marca_codigo", marca.codigo or ""), ("version", DELIVERY_TEMPLATE_VERSION),
+            ("data_start", start_row), ("data_end", end_row), ("categoria", category),
         ], start=1):
             meta.cell(row, 1, key)
             meta.cell(row, 2, value)
@@ -458,7 +544,8 @@ class MarcasService:
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
-        filename = f"Plantilla_Productos_{marca.codigo or 'MARCA'}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        category_slug = "_".join(category.replace("/", " ").split())
+        filename = f"Plantilla_Inventario_{category_slug}_{marca.codigo or 'MARCA'}_{datetime.now().strftime('%Y%m%d')}.xlsx"
         return output, filename
 
     @staticmethod
@@ -479,14 +566,64 @@ class MarcasService:
         if "Plantilla_Inventario" not in wb.sheetnames or "_plantilla" not in wb.sheetnames:
             raise ValueError("La plantilla no corresponde al formato de importación de productos")
         meta = wb["_plantilla"]
-        if meta["A1"].value != "marca_id" or str(meta["B1"].value) != str(marca.id) or meta["B3"].value != 2:
+        if meta["A1"].value != "marca_id" or str(meta["B1"].value) != str(marca.id) or meta["B3"].value != DELIVERY_TEMPLATE_VERSION:
             raise ValueError("La plantilla pertenece a otra marca o tiene una versión no compatible. Descarga una plantilla nueva.")
 
         ws = wb["Plantilla_Inventario"]
         data_start, data_end = meta["B4"].value, meta["B5"].value
         if not isinstance(data_start, int) or not isinstance(data_end, int) or data_start < 11 or data_end < data_start:
             raise ValueError("La plantilla no contiene un rango de productos válido")
+        category = normalize_category(marca.categoria)
+        category_fields = CATEGORY_FIELDS.get(category, ())
+        category_start_col = len(DELIVERY_BASE_HEADERS) + 1
+        if meta["B6"].value != category or [ws.cell(10, col).value for col in range(category_start_col, category_start_col + len(category_fields))] != [label.upper() for _, label in category_fields]:
+            raise ValueError("El rubro de la marca cambió. Descarga una plantilla nueva.")
         rows, seen_skus = [], set()
+        embedded_by_row = {}
+        image_bytes_total = 0
+        # ponytail: supports Excel OOXML rich-data in-cell images and standard floating images; other formats need a parser extension.
+        image_types = {"JPEG": (".jpg", "image/jpeg"), "PNG": (".png", "image/png"), "WEBP": (".webp", "image/webp")}
+        for row_num, content in _extract_in_cell_images(file_bytes, "Plantilla_Inventario", data_start, data_end).items():
+            try:
+                with PILImage.open(io.BytesIO(content)) as picture:
+                    image_format = (picture.format or "").upper()
+                    picture.verify()
+            except Exception as exc:
+                raise ValueError(f"La imagen incrustada de la fila {row_num} no es válida") from exc
+            if image_format not in image_types:
+                raise ValueError(f"La imagen de la fila {row_num} debe ser JPG, PNG o WEBP")
+            if len(content) > 8 * 1024 * 1024:
+                raise ValueError(f"La imagen de la fila {row_num} supera 8 MB")
+            image_bytes_total += len(content)
+            if image_bytes_total > 32 * 1024 * 1024:
+                raise ValueError("Las imágenes incrustadas superan el límite total de 32 MB")
+            extension, content_type = image_types[image_format]
+            embedded_by_row[row_num] = (content, extension, content_type)
+        for embedded in ws._images:
+            row_index = getattr(getattr(getattr(embedded, "anchor", None), "_from", None), "row", None)
+            if row_index is None or not data_start - 1 <= row_index <= data_end - 1:
+                continue  # Ignora el logo de marca y las imágenes fuera de las filas de productos.
+            row_num = row_index + 1
+            # ponytail: asociar por fila admite una imagen por producto; varias requerirían una convención de galería.
+            if row_num in embedded_by_row:
+                raise ValueError(f"Solo se permite una imagen incrustada por producto (fila {row_num})")
+            try:
+                content = embedded._data()
+                with PILImage.open(io.BytesIO(content)) as picture:
+                    image_format = (picture.format or "").upper()
+                    picture.verify()
+            except Exception as exc:
+                raise ValueError(f"La imagen incrustada de la fila {row_num} no es válida") from exc
+            image_types = {"JPEG": (".jpg", "image/jpeg"), "PNG": (".png", "image/png"), "WEBP": (".webp", "image/webp")}
+            if image_format not in image_types:
+                raise ValueError(f"La imagen de la fila {row_num} debe ser JPG, PNG o WEBP")
+            if len(content) > 8 * 1024 * 1024:
+                raise ValueError(f"La imagen de la fila {row_num} supera 8 MB")
+            image_bytes_total += len(content)
+            if image_bytes_total > 32 * 1024 * 1024:
+                raise ValueError("Las imágenes incrustadas superan el límite total de 32 MB")
+            extension, content_type = image_types[image_format]
+            embedded_by_row[row_num] = (content, extension, content_type)
 
         def parse_amount(value, label, row_num, required=False, allow_zero=True):
             if value is None or str(value).strip() == "":
@@ -509,10 +646,10 @@ class MarcasService:
                 raise ValueError(f"{label} debe ser {'mayor que cero' if not allow_zero else 'cero o mayor'} (fila {row_num})")
             return amount
 
-        for row_num, values in enumerate(ws.iter_rows(min_row=data_start, max_row=data_end, min_col=1, max_col=10, values_only=True), start=data_start):
+        for row_num, values in enumerate(ws.iter_rows(min_row=data_start, max_row=data_end, min_col=1, max_col=len(DELIVERY_BASE_HEADERS) + len(category_fields), values_only=True), start=data_start):
             # Ignorar solo filas completamente vacías en las columnas editables.
-            editable = values[1:10]
-            if all(value is None or str(value).strip() == "" for value in editable):
+            editable = values[1:]
+            if all(value is None or str(value).strip() == "" for value in editable) and row_num not in embedded_by_row:
                 continue
             sku = str(values[1]).strip().upper() if values[1] is not None else ""
             name = str(values[2]).strip() if values[2] is not None else ""
@@ -526,32 +663,40 @@ class MarcasService:
                 raise ValueError(f"El SKU {sku} está repetido en la plantilla (fila {row_num})")
             seen_skus.add(sku)
 
-            price = parse_amount(values[5], "precio de venta", row_num, required=False, allow_zero=False)
-            quantity_decimal = parse_amount(values[6], "cantidad recibida", row_num, required=True, allow_zero=False)
+            price = parse_amount(values[4], "precio de venta", row_num, required=False, allow_zero=False)
+            quantity_decimal = parse_amount(values[5], "cantidad recibida", row_num, required=True, allow_zero=False)
             if quantity_decimal != quantity_decimal.to_integral_value() or quantity_decimal > 2147483647:
                 raise ValueError(f"La cantidad recibida de la fila {row_num} debe ser un entero positivo dentro del rango permitido")
             if price is not None and price > Decimal("9999999999.99"):
                 raise ValueError(f"El precio de la fila {row_num} excede el máximo admitido")
-            cost = parse_amount(values[7], "costo unitario", row_num)
-            if cost is not None and cost > Decimal("99999999.999999"):
-                raise ValueError(f"El costo de la fila {row_num} excede el máximo admitido")
-            critical_decimal = parse_amount(values[8], "stock crítico", row_num)
-            if critical_decimal is not None and (critical_decimal != critical_decimal.to_integral_value() or critical_decimal > 2147483647):
-                raise ValueError(f"El stock crítico de la fila {row_num} debe ser un entero dentro del rango permitido")
-            image_url = str(values[9]).strip() if values[9] is not None and str(values[9]).strip() else None
+            image_url = str(values[6]).strip() if values[6] is not None and str(values[6]).strip() else None
+            if image_url and row_num in embedded_by_row and image_url.startswith("#"):
+                image_url = None  # Excel reports #VALUE! for rich-data images when openpyxl reads the cell.
             if image_url and len(image_url) > 2000:
                 raise ValueError(f"La URL de imagen de la fila {row_num} es demasiado larga")
+            if image_url:
+                parsed_image_url = urlparse(image_url)
+                if parsed_image_url.scheme not in ("http", "https") or not parsed_image_url.netloc:
+                    raise ValueError(f"La URL de imagen de la fila {row_num} debe comenzar con http:// o https://")
+            details = validate_category_details(category, {
+                field: str(values[len(DELIVERY_BASE_HEADERS) + index]).strip()
+                for index, (field, _) in enumerate(category_fields)
+                if values[len(DELIVERY_BASE_HEADERS) + index] is not None and str(values[len(DELIVERY_BASE_HEADERS) + index]).strip()
+            })
+            size_value = details.pop("talla", None)
+            if size_value is None:
+                size_value = details.pop("tamano", None)
             rows.append({
                 "row_num": row_num,
                 "sku": sku,
                 "nombre": name,
                 "descripcion": str(values[3]).strip() if values[3] is not None and str(values[3]).strip() else None,
-                "tamano": str(values[4]).strip() if values[4] is not None and str(values[4]).strip() else None,
+                "tamano": size_value,
                 "precio": price,
                 "stock_inicial": int(quantity_decimal),
-                "costo_nio": cost,
-                "stock_critico": int(critical_decimal) if critical_decimal is not None else 5,
                 "imagen_url": image_url,
+                "imagen_incrustada": row_num in embedded_by_row,
+                "detalles_rubro": details,
             })
         if not rows:
             raise ValueError("No hay productos para importar")
@@ -577,6 +722,7 @@ class MarcasService:
                 if item["precio"] is None:
                     raise ValueError(f"La fila {item['row_num']} necesita el precio para crear un producto nuevo")
 
+        uploaded_image_urls = []
         try:
             ingreso = Ingreso(
                 marca_id=marca_id,
@@ -597,19 +743,28 @@ class MarcasService:
                 if producto:
                     productos_actualizados += 1
                 else:
+                    embedded_image_url = None
+                    if item["imagen_incrustada"]:
+                        content, extension, content_type = embedded_by_row[item["row_num"]]
+                        embedded_image_url = upload_image(
+                            f"moonconcept/productos/{marca_id}/{item['sku']}",
+                            f"{item['sku']}{extension}", content, content_type,
+                        )
+                        uploaded_image_urls.append(embedded_image_url)
+                    image_urls = list(dict.fromkeys(url for url in (item["imagen_url"], embedded_image_url) if url))
                     producto = Producto(
                         marca_id=marca_id,
-                        categoria=marca.categoria or "ROPA VARIADA",
-                        detalles_rubro={},
+                        categoria=category,
+                        detalles_rubro=item["detalles_rubro"],
                         sku=item["sku"],
                         nombre=item["nombre"],
                         descripcion=item["descripcion"],
                         tamano=item["tamano"],
                         precio=item["precio"],
-                        costo_nio=item["costo_nio"],
                         stock_inicial=0,
-                        stock_critico=item["stock_critico"],
-                        imagen_url=item["imagen_url"],
+                        stock_critico=5,
+                        imagen_url=item["imagen_url"] or embedded_image_url,
+                        imagenes=image_urls,
                         estado_id=1,
                         codigo_qr=f"BHPOS-{item['sku']}",
                     )
@@ -625,7 +780,7 @@ class MarcasService:
                     ingreso_id=ingreso.id,
                     producto_id=producto.id,
                     cantidad=cantidad,
-                    precio_ingreso=item["costo_nio"],
+                    precio_ingreso=None,
                 ))
                 movimientos.append(Kardex(
                     producto_id=producto.id,
@@ -640,6 +795,8 @@ class MarcasService:
             db.commit()
         except Exception:
             db.rollback()
+            for image_url in uploaded_image_urls:
+                delete_image(image_url)
             raise
         return {
             "ingreso_id": ingreso.id,

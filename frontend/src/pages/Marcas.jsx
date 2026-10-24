@@ -208,7 +208,7 @@ export default function MarcasPage() {
   const handleDownloadFichaEntrega = async (brand) => {
     setIsDownloadingExcel(true);
     try {
-      await marcasService.downloadFichaEntrega(brand.id, brand.nombre_marca);
+      await marcasService.downloadFichaEntrega(brand.id, brand.nombre_marca, brand.categoria);
     } catch (err) {
       console.error("Error descargando ficha de entrega:", err);
       alert("Error al generar la ficha de entrega: " + (err.response?.data?.detail || err.message));

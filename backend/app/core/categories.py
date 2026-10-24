@@ -65,7 +65,8 @@ def normalize_category(category: str | None) -> str:
 def validate_category_details(category: str, details: dict[str, str] | None) -> dict[str, str]:
     fields = {key for key, _ in CATEGORY_FIELDS.get(category, ())}
     values = details or {}
-    invalid = set(values) - fields
+    # ponytail: accept legacy size keys; templates map rubric-specific talla/tamano fields into Producto.tamano.
+    invalid = set(values) - fields - {"talla", "tamano"}
     if invalid:
         raise ValueError(f"Campos no válidos para el rubro {category}: {', '.join(sorted(invalid))}")
     cleaned = {}

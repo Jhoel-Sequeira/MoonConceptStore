@@ -23,7 +23,6 @@ const formatInvoiceDate = (value) => new Intl.DateTimeFormat('es-NI', {
   day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
 }).format(new Date(value));
 const normalizeSearch = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-
 export default function POSPage() {
   const [productos, setProductos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -34,6 +33,9 @@ export default function POSPage() {
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [selectedMetodoPago, setSelectedMetodoPago] = useState('Efectivo');
+  const [cashEntryOpen, setCashEntryOpen] = useState(false);
+  const [cardPaymentOpen, setCardPaymentOpen] = useState(false);
+  const [cashReceived, setCashReceived] = useState('');
   const [customer, setCustomer] = useState('Consumidor Final');
   const [processingSale, setProcessingSale] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
@@ -247,20 +249,34 @@ export default function POSPage() {
 
   const subtotal = cart.reduce((acc, item) => acc + item.precio * item.qty, 0);
   const totalItems = cart.reduce((acc, item) => acc + item.qty, 0);
+  const totalCents = Math.round(subtotal * 100);
+  const cardCommissionCents = Math.round(totalCents * 5 / 100);
+  const cardTotalCents = totalCents + cardCommissionCents;
+  const cashReceivedCents = Math.max(0, Math.round((Number(cashReceived.replace(',', '.')) || 0) * 100));
+  const changeCents = Math.max(0, cashReceivedCents - totalCents);
 
   // Procesar venta en el Backend Python
   const handleCompleteSale = async (metodo) => {
+    const paymentMethod = metodo || selectedMetodoPago;
+    if (paymentMethod === 'Efectivo' && cashReceivedCents < totalCents) return;
     try {
       setProcessingSale(true);
       const result = await posService.crearVenta({
         cliente: customer.trim() || 'Consumidor Final',
-        metodo_pago: metodo || selectedMetodoPago,
+        metodo_pago: paymentMethod,
         items: cart.map((item) => ({ producto_id: item.id, cantidad: item.qty })),
       });
-      setInvoice(result);
+      setInvoice({
+        ...result,
+        efectivo_recibido: paymentMethod === 'Efectivo' ? cashReceivedCents / 100 : null,
+        vuelto: paymentMethod === 'Efectivo' ? changeCents / 100 : null,
+      });
       setReceiptOpen(false);
       setCart([]);
       setPaymentModalOpen(false);
+      setCashEntryOpen(false);
+      setCardPaymentOpen(false);
+      setCashReceived('');
 
       // Recargar stock actualizado desde la base de datos
       cargarProductos();
@@ -534,7 +550,7 @@ export default function POSPage() {
               </div>
               <button
                 disabled={cart.length === 0 || processingSale}
-                onClick={() => setPaymentModalOpen(true)}
+                onClick={() => { setCashEntryOpen(false); setCardPaymentOpen(false); setCashReceived(''); setPaymentModalOpen(true); }}
                 className="w-full py-3 rounded-xl bg-primary text-on-primary font-bold text-sm shadow-md hover:opacity-95 disabled:opacity-50 mt-2 flex items-center justify-center gap-2"
               >
                 <span className="material-symbols-outlined text-[18px]">payments</span>
@@ -567,26 +583,50 @@ export default function POSPage() {
       {/* Modal Cobro */}
       {paymentModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-surface-container-lowest rounded-2xl shadow-xl w-full max-w-sm p-6 flex flex-col gap-4">
+          <div className="bg-surface-container-lowest rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-4">
             <h3 className="font-bold text-lg text-on-surface">Seleccionar Método de Pago</h3>
             <div className="text-center py-2 bg-surface-container-low rounded-xl">
-              <span className="text-xs text-on-surface-variant">Total Factura</span>
+              <span className="text-xs text-on-surface-variant">Subtotal de productos</span>
               <div className="font-bold text-2xl text-primary font-mono">{formatCordobas(subtotal)}</div>
             </div>
             <div className="flex flex-col gap-2">
               <button
                 disabled={processingSale}
-                onClick={() => handleCompleteSale('Efectivo')}
+                aria-expanded={cashEntryOpen}
+                onClick={() => { setSelectedMetodoPago('Efectivo'); setCardPaymentOpen(false); setCashEntryOpen(true); }}
                 className="p-3 rounded-xl bg-surface-container-low hover:bg-primary hover:text-on-primary flex items-center justify-between text-sm font-semibold transition-colors"
               >
                 <span className="flex items-center gap-2">
                   <span className="material-symbols-outlined">payments</span> Efectivo
                 </span>
-                <span>Exacto</span>
+                <span>Ingresar billetes</span>
               </button>
+              {cashEntryOpen && (
+                <section aria-label="Conteo de efectivo" className="rounded-xl border border-surface-container-high p-3">
+                  <label className="block text-sm font-semibold text-on-surface" htmlFor="cash-received">Efectivo recibido (C$)
+                    <input id="cash-received" type="text" inputMode="decimal" autoFocus value={cashReceived} disabled={processingSale} onChange={(event) => {
+                      const value = event.target.value;
+                      if (/^\d*(?:[.,]\d{0,2})?$/.test(value)) setCashReceived(value);
+                    }} placeholder="0.00" className="mt-2 w-full rounded-lg border border-surface-container-high bg-white px-3 py-2.5 text-base font-mono text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50" />
+                  </label>
+                  <div aria-live="polite" className="mt-4 space-y-2 rounded-lg bg-surface-container-low p-3 text-sm">
+                    <div className="flex justify-between gap-2"><span>Efectivo recibido</span><strong>{formatCordobas(cashReceivedCents / 100)}</strong></div>
+                    {cashReceivedCents >= totalCents ? (
+                      <div className="flex justify-between gap-2 text-primary"><span>Vuelto</span><strong>{formatCordobas(changeCents / 100)}</strong></div>
+                    ) : (
+                      <div className="flex justify-between gap-2 text-error"><span>Falta</span><strong>{formatCordobas((totalCents - cashReceivedCents) / 100)}</strong></div>
+                    )}
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button type="button" disabled={processingSale || cashReceived === ''} onClick={() => setCashReceived('')} className="rounded-lg border border-surface-container-high px-3 py-2 text-xs font-semibold text-on-surface-variant disabled:opacity-50">Limpiar</button>
+                    <button type="button" disabled={processingSale || cashReceivedCents < totalCents} onClick={() => handleCompleteSale('Efectivo')} className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-bold text-on-primary disabled:cursor-not-allowed disabled:opacity-50">Cobrar y dar vuelto</button>
+                  </div>
+                </section>
+              )}
               <button
                 disabled={processingSale}
-                onClick={() => handleCompleteSale('Tarjeta')}
+                aria-expanded={cardPaymentOpen}
+                onClick={() => { setSelectedMetodoPago('Tarjeta'); setCashEntryOpen(false); setCashReceived(''); setCardPaymentOpen(true); }}
                 className="p-3 rounded-xl bg-surface-container-low hover:bg-primary hover:text-on-primary flex items-center justify-between text-sm font-semibold transition-colors"
               >
                 <span className="flex items-center gap-2">
@@ -594,6 +634,16 @@ export default function POSPage() {
                 </span>
                 <span>Terminal 01</span>
               </button>
+              {cardPaymentOpen && (
+                <section aria-label="Comisión de terminal POS" className="rounded-xl border border-surface-container-high p-3">
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between gap-2"><span className="text-on-surface-variant">Subtotal de productos</span><strong>{formatCordobas(totalCents / 100)}</strong></div>
+                    <div className="flex justify-between gap-2"><span className="text-on-surface-variant">Comisión terminal (5%)</span><strong>{formatCordobas(cardCommissionCents / 100)}</strong></div>
+                    <div className="flex justify-between gap-2 border-t border-surface-container-high pt-2 font-bold text-primary"><span>Total con tarjeta</span><strong>{formatCordobas(cardTotalCents / 100)}</strong></div>
+                  </div>
+                  <button type="button" disabled={processingSale} onClick={() => handleCompleteSale('Tarjeta')} className="mt-3 w-full rounded-lg bg-primary px-3 py-2.5 text-sm font-bold text-on-primary disabled:opacity-50">Confirmar y cobrar {formatCordobas(cardTotalCents / 100)}</button>
+                </section>
+              )}
               <button
                 disabled={processingSale}
                 onClick={() => handleCompleteSale('Transferencia')}
@@ -625,6 +675,9 @@ export default function POSPage() {
             <div className="my-5 space-y-3 border-y border-[#eaded5] py-4 text-left text-xs">
               <div className="flex justify-between gap-3"><span className="text-on-surface-variant"># Factura</span><strong className="font-mono">{String(invoice.id).padStart(6, '0')}</strong></div>
               <div className="flex justify-between gap-3"><span className="text-on-surface-variant">Fecha</span><strong>{formatInvoiceDate(invoice.fecha_venta)}</strong></div>
+              {Number(invoice.comision_pos) > 0 && <div className="flex justify-between gap-3"><span className="text-on-surface-variant">Comisión terminal (5%)</span><strong>{formatCordobas(invoice.comision_pos)}</strong></div>}
+              {invoice.efectivo_recibido !== null && <div className="flex justify-between gap-3"><span className="text-on-surface-variant">Efectivo recibido</span><strong>{formatCordobas(invoice.efectivo_recibido)}</strong></div>}
+              {invoice.vuelto !== null && <div className="flex justify-between gap-3 font-bold text-primary"><span>Vuelto</span><strong>{formatCordobas(invoice.vuelto)}</strong></div>}
               <div className="flex justify-between gap-3"><span className="text-on-surface-variant">Método de pago</span><strong>{invoice.metodo_pago}</strong></div>
             </div>
             <div className="flex flex-col gap-2">
@@ -654,9 +707,12 @@ export default function POSPage() {
               </div>)}
             </div>
             <div className="space-y-1 border-b border-dashed border-[#c9a46d]/50 py-3 text-[11px]">
-              <div className="flex justify-between"><span>Subtotal</span><span>{formatCordobas(invoice.total)}</span></div>
+              <div className="flex justify-between"><span>Subtotal</span><span>{formatCordobas(invoice.subtotal ?? invoice.total)}</span></div>
+              {Number(invoice.comision_pos) > 0 && <div className="flex justify-between"><span>Comisión terminal (5%)</span><span>{formatCordobas(invoice.comision_pos)}</span></div>}
               <div className="flex justify-between"><span>Descuento</span><span>{formatCordobas(0)}</span></div>
               <div className="flex justify-between pt-1 text-sm font-bold"><span>Total</span><span>{formatCordobas(invoice.total)}</span></div>
+              {invoice.efectivo_recibido !== null && <div className="flex justify-between pt-1"><span>Efectivo recibido</span><span>{formatCordobas(invoice.efectivo_recibido)}</span></div>}
+              {invoice.vuelto !== null && <div className="flex justify-between font-bold"><span>Vuelto</span><span>{formatCordobas(invoice.vuelto)}</span></div>}
             </div>
             <div className="py-3 text-center text-[10px]">
               <p>Gracias por tu compra</p>

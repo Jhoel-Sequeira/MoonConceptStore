@@ -1,7 +1,7 @@
 import urllib.request
 import json
 
-base_url = "http://localhost:8000/api/v1/marcas"
+base_url = "http://localhost:8001/api/v1/marcas"
 
 # 1. Crear marca de prueba
 new_brand = {
