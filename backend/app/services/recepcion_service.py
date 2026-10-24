@@ -5,6 +5,7 @@ from app.models.ingresos import Ingreso, IngresoDetalle
 from app.models.inventario import Producto
 from app.models.marcas import Marca
 from app.models.usuarios import Usuario
+from app.services.marcas_service import MarcasService
 
 
 class RecepcionService:
@@ -101,3 +102,23 @@ class RecepcionService:
             "unidades": sum(item["cantidad"] for item in productos),
             "productos": productos,
         }
+
+    @staticmethod
+    def generate_qr_pdf(db: Session, ingreso_id: int) -> tuple[bytes, int] | None:
+        ingreso = db.query(Ingreso.id).filter(
+            Ingreso.id == ingreso_id,
+            Ingreso.tipo_carga == "IMPORTACION EXCEL",
+        ).first()
+        if not ingreso:
+            return None
+
+        details = (
+            db.query(IngresoDetalle, Producto)
+            .join(Producto, Producto.id == IngresoDetalle.producto_id)
+            .filter(IngresoDetalle.ingreso_id == ingreso_id)
+            .order_by(IngresoDetalle.id)
+            .all()
+        )
+        if not details:
+            return b"", 0
+        return MarcasService.generate_import_qr_pdf([(product, detail) for detail, product in details]), len(details)

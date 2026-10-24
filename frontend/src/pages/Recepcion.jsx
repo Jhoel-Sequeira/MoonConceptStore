@@ -4,7 +4,7 @@ import brandConfig from '../brandConfig';
 import recepcionService from '../services/recepcionService';
 import { inventarioService } from '../services/inventarioService';
 import { formatCordobas } from '../utils/currency';
-import { SplashScreen } from '../components/ui/FeedbackProvider';
+import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
 
 const dateLabel = (value) => {
   if (!value) return '—';
@@ -13,6 +13,7 @@ const dateLabel = (value) => {
 };
 
 export default function RecepcionPage() {
+  const { notify } = useFeedback();
   const [ingresos, setIngresos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -21,6 +22,7 @@ export default function RecepcionPage() {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
+  const [downloadingQr, setDownloadingQr] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -61,6 +63,19 @@ export default function RecepcionPage() {
   };
 
   const closeDetail = () => { setSelected(null); setDetail(null); setDetailError(''); };
+
+  const downloadQrPdf = async () => {
+    if (!detail || downloadingQr) return;
+    try {
+      setDownloadingQr(true);
+      const count = await recepcionService.downloadQrPdf(detail.ingreso_id);
+      notify(`Se descargó el PDF con ${count} códigos QR de esta importación.`, 'success');
+    } catch (err) {
+      notify(err.response?.data?.detail || 'No se pudo regenerar el PDF de códigos QR.', 'error');
+    } finally {
+      setDownloadingQr(false);
+    }
+  };
 
   return (
     <div className="flex w-full flex-col gap-5">
@@ -136,7 +151,12 @@ export default function RecepcionPage() {
                 </tr>)}</tbody>
               </table>
             </div>
-            <footer className="flex justify-end border-t border-surface-container-low p-4"><button onClick={closeDetail} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white">Cerrar</button></footer>
+            <footer className="flex flex-wrap justify-between gap-2 border-t border-surface-container-low p-4">
+              <button type="button" disabled={downloadingQr || !detail.productos.length} onClick={downloadQrPdf} className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/60 px-4 py-2 text-sm font-semibold text-on-surface hover:bg-surface-container-low disabled:opacity-50">
+                <span className="material-symbols-outlined text-lg">qr_code_2</span>{downloadingQr ? 'Generando QR…' : 'Volver a descargar QR'}
+              </button>
+              <button type="button" onClick={closeDetail} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white">Cerrar</button>
+            </footer>
           </>}
         </section>
       </div>}

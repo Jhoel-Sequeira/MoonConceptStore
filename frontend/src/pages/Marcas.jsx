@@ -232,7 +232,7 @@ export default function MarcasPage() {
       link.click();
       document.body.removeChild(link);
       window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
-      notify(`Importación completada para ${brand.nombre_marca}: ${result.creados} productos nuevos, ${result.actualizados} productos existentes con stock aumentado y ${result.unidades} unidades agregadas.`, 'success');
+      notify(`Importación completada para ${brand.nombre_marca}. Se descargó el PDF con los QR de los productos importados (${result.creados} nuevos, ${result.actualizados} actualizados, ${result.unidades} unidades).`, 'success');
       const refreshedBrands = await loadBrands();
       const refreshedBrand = refreshedBrands.find((item) => item.id === brand.id);
       if (refreshedBrand && selectedBrandForDetail?.id === brand.id) setSelectedBrandForDetail(refreshedBrand);

@@ -791,7 +791,7 @@ class MarcasService:
                     motivo=f"Importación de productos desde {ingreso.observaciones}",
                 ))
             db.add_all(detalles + movimientos)
-            qr_pdf = MarcasService._generate_import_qr_pdf(productos_procesados)
+            qr_pdf = MarcasService.generate_import_qr_pdf(productos_procesados)
             db.commit()
         except Exception:
             db.rollback()
@@ -808,7 +808,7 @@ class MarcasService:
         }
 
     @staticmethod
-    def _generate_import_qr_pdf(productos_procesados: list) -> bytes:
+    def generate_import_qr_pdf(productos_procesados: list) -> bytes:
         import qrcode
 
         # ponytail: rasterizar una hoja carta con Pillow evita añadir una dependencia PDF.
