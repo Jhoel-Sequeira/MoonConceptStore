@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import inventarioService from '../services/inventarioService';
 import marcasService from '../services/marcasService';
 import brandConfig from '../brandConfig';
@@ -7,6 +8,7 @@ import { RUBROS, RUBRO_FIELDS } from '../constants/rubros';
 import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
 
 export default function CatalogoQRPage() {
+  const location = useLocation();
   const { notify, confirm } = useFeedback();
   const [productos, setProductos] = useState([]);
   const [marcas, setMarcas] = useState([]);
@@ -28,6 +30,7 @@ export default function CatalogoQRPage() {
   const [thermalFormat, setThermalFormat] = useState('50x30mm');
   const [disposition, setDisposition] = useState('2 Columnas');
   const [showLogoOnLabel, setShowLogoOnLabel] = useState(true);
+  const productSearchRequest = useRef(0);
 
   // Formulario producto (Crear / Editar)
   const [formData, setFormData] = useState({
@@ -45,39 +48,61 @@ export default function CatalogoQRPage() {
   });
 
   const fetchData = async () => {
+    const requestId = ++productSearchRequest.current;
     try {
       setLoading(true);
-      const [prodsData, marcasData, statsData] = await Promise.all([
-        inventarioService.getAll({
-          marca_id: selectedMarcaId || undefined,
-          categoria: selectedCategory || undefined,
-          search: search || undefined,
-        }),
-        marcasService.getAll(),
-        inventarioService.getStats(),
-      ]);
+      const prodsData = await inventarioService.getAll({
+        marca_id: selectedMarcaId || undefined,
+        categoria: selectedCategory || undefined,
+        search: search.trim() || undefined,
+      });
 
+      if (requestId !== productSearchRequest.current) return;
       setProductos(prodsData);
-      setMarcas(marcasData);
-      setStats(statsData);
 
       // Preseleccionar por defecto todos o los primeros
       if (prodsData.length > 0 && selectedIds.size === 0) {
         setSelectedIds(new Set(prodsData.map((p) => p.id)));
       }
-      if (prodsData.length > 0 && !previewProduct) {
-        setPreviewProduct(prodsData[0]);
-      }
+      setPreviewProduct((current) => current && prodsData.some((product) => product.id === current.id)
+        ? current
+        : prodsData[0] || null);
     } catch (err) {
-      console.error('Error cargando inventario:', err);
+      if (requestId === productSearchRequest.current) {
+        console.error('Error cargando inventario:', err);
+        notify(err.response?.data?.detail || 'No se pudo buscar el inventario.', 'error');
+      }
     } finally {
-      setLoading(false);
+      if (requestId === productSearchRequest.current) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-  }, [selectedMarcaId, selectedCategory]);
+    let active = true;
+    Promise.all([marcasService.getAll(), inventarioService.getStats()])
+      .then(([brands, inventoryStats]) => {
+        if (!active) return;
+        setMarcas(Array.isArray(brands) ? brands : []);
+        setStats(inventoryStats);
+      })
+      .catch((err) => { if (active) notify(err.response?.data?.detail || 'No se pudieron cargar las marcas y estadísticas.', 'error'); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(fetchData, search.trim() ? 250 : 0);
+    return () => {
+      window.clearTimeout(timer);
+      productSearchRequest.current += 1;
+    };
+  }, [selectedMarcaId, selectedCategory, search]);
+
+  useEffect(() => {
+    if (location.state?.globalSearch) {
+      setSearch(location.state.globalSearch);
+      setSelectedIds(new Set());
+    }
+  }, [location.state]);
 
   useEffect(() => {
     const previewUrls = photoFiles.map((file) => URL.createObjectURL(file));
@@ -87,7 +112,6 @@ export default function CatalogoQRPage() {
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    fetchData();
   };
 
   const handleSelectAll = (e) => {
@@ -388,7 +412,7 @@ export default function CatalogoQRPage() {
             </span>
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setSelectedIds(new Set()); }}
               className="w-full h-[36px] pl-8 pr-3 rounded-lg bg-surface-container-low text-on-surface placeholder:text-on-surface-variant font-body-sm text-body-sm focus:outline-none focus:bg-surface-container-lowest shadow-sm"
               placeholder="Buscar SKU, nombre o ref..."
               type="text"

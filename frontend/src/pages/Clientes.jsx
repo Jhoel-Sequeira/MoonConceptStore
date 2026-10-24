@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import brandConfig from '../brandConfig';
 import clientesService from '../services/clientesService';
 import { formatCordobas } from '../utils/currency';
@@ -7,6 +8,7 @@ import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
 const blankForm = { nombre_cliente: '', telefono: '', correo: '' };
 
 export default function ClientesPage() {
+  const location = useLocation();
   const { notify } = useFeedback();
   const [clientes, setClientes] = useState([]);
   const [buscar, setBuscar] = useState('');
@@ -16,6 +18,10 @@ export default function ClientesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(blankForm);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (location.state?.globalSearch) setBuscar(location.state.globalSearch);
+  }, [location.state]);
 
   useEffect(() => {
     let active = true;

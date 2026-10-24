@@ -13,7 +13,7 @@ import logoDorado from '../imagenes/logoDorado.png';
 export const brandConfig = {
   // 1. Identidad de la Marca / Empresa
   name: "Room Concept Store",
-  tagline: "Find Your Style",
+  tagline: "",
   companyName: "Room Concept Store",
   branchName: "Managua",
 

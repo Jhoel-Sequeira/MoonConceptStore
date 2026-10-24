@@ -6,7 +6,7 @@ import brandConfig from './brandConfig'
 
 // Aplicar dinámicamente título y variables CSS globales desde brandConfig
 if (typeof document !== 'undefined') {
-  document.title = `${brandConfig.name} - ${brandConfig.tagline}`;
+  document.title = `${brandConfig.name}${brandConfig.tagline}`;
   let favicon = document.querySelector('link[rel="icon"]');
   if (!favicon) {
     favicon = document.createElement('link');

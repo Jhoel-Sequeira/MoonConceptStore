@@ -92,6 +92,14 @@ export default function LiquidacionesPage() {
   }, []);
   useEffect(() => {
     if (view !== 'ventas') return undefined;
+    const timer = window.setTimeout(() => {
+      setSalesPage(1);
+      setActiveSalesFilters({ ...salesFilters });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [salesFilters, view]);
+  useEffect(() => {
+    if (view !== 'ventas') return undefined;
     let cancelled = false;
     setSalesLoading(true);
     setError('');

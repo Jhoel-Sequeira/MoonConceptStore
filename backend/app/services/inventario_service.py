@@ -102,7 +102,12 @@ class InventarioService:
             query = query.filter(Producto.categoria == categoria)
         if search:
             s = f"%{search.strip()}%"
-            query = query.filter((Producto.nombre.ilike(s)) | (Producto.sku.ilike(s)) | (Producto.descripcion.ilike(s)))
+            query = query.filter(
+                (Producto.nombre.ilike(s))
+                | (Producto.sku.ilike(s))
+                | (Producto.codigo_qr.ilike(s))
+                | (Producto.descripcion.ilike(s))
+            )
             
         productos = query.options(joinedload(Producto.marca)).order_by(Producto.id.desc()).all()
         stocks = InventarioService._get_stock_by_product(db, [p.id for p in productos])
