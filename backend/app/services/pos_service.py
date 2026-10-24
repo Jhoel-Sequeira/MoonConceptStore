@@ -120,7 +120,7 @@ class POSService:
             sale_day = business_day()
             lock_day(db, sale_day)
             if db.execute(
-                text("SELECT 1 FROM cierres_caja WHERE fecha = :day"), {"day": sale_day}
+                text("SELECT 1 FROM cierres_caja WHERE fecha = :day AND (reabierta_en IS NULL OR reabierta_en <= cerrado_en)"), {"day": sale_day}
             ).first():
                 raise ValueError("La caja de hoy ya fue cerrada. Las ventas se habilitarán mañana.")
 

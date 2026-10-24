@@ -8,6 +8,7 @@ const localDateParts = (options) => Object.fromEntries(new Intl.DateTimeFormat('
 const currentPeriod = () => { const p = localDateParts({ year: 'numeric', month: '2-digit' }); return `${p.year}-${p.month}`; };
 const todayLocal = () => { const p = localDateParts({ year: 'numeric', month: '2-digit', day: '2-digit' }); return `${p.year}-${p.month}-${p.day}`; };
 const initialSalesFilters = () => ({ desde: `${currentPeriod()}-01`, hasta: todayLocal(), marca_id: '', metodo_pago: '', buscar: '' });
+const normalizeText = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[char]);
@@ -56,6 +57,8 @@ export default function LiquidacionesPage() {
   const [reference, setReference] = useState('');
   const [filter, setFilter] = useState('Todos');
   const [brandFilter, setBrandFilter] = useState('');
+  const [brandSearch, setBrandSearch] = useState('');
+  const [brandSearchOpen, setBrandSearchOpen] = useState(false);
   const [previewBrandId, setPreviewBrandId] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -151,8 +154,19 @@ export default function LiquidacionesPage() {
       const settlement = settlements.find((item) => item.marca_id === brand.marca_id);
       return { ...brand, settlement };
     }).filter((brand) => (filter === 'Todos' || brand.settlement?.estado === filter)
-      && (!brandFilter || String(brand.marca_id) === brandFilter));
-  }, [report, settlements, filter, brandFilter]);
+      && (brandFilter ? String(brand.marca_id) === brandFilter : normalizeText(brand.marca).includes(normalizeText(brandSearch))));
+  }, [report, settlements, filter, brandFilter, brandSearch]);
+
+  const brandSuggestions = (report?.por_marca || [])
+    .filter((brand) => normalizeText(brand.marca).includes(normalizeText(brandSearch)))
+    .slice(0, 8);
+
+  const selectReportBrand = (brand) => {
+    setBrandFilter(String(brand.marca_id));
+    setBrandSearch(brand.marca);
+    setBrandSearchOpen(false);
+    setPreviewBrandId('');
+  };
 
   const exportCsv = () => {
     if (!report) return;
@@ -259,10 +273,14 @@ export default function LiquidacionesPage() {
           <div className="p-5 flex flex-wrap justify-between items-center gap-3 border-b border-surface-container-low">
             <div><h2 className="font-bold text-on-surface">Liquidaciones por marca</h2><p className="text-xs text-on-surface-variant">{summary.transacciones} ventas registradas</p></div>
             <div className="flex flex-wrap items-center gap-2">
-              <label htmlFor="settlement-brand" className="sr-only">Filtrar liquidación por marca</label>
-              <select id="settlement-brand" value={brandFilter} onChange={(event) => setBrandFilter(event.target.value)} className="rounded-lg border border-outline-variant px-3 py-2 text-sm">
-                <option value="">Todas las marcas</option>{report.por_marca.map((brand) => <option key={brand.marca_id} value={brand.marca_id}>{brand.marca}</option>)}
-              </select>
+              <div className="relative w-full sm:w-64">
+                <label htmlFor="settlement-brand" className="sr-only">Buscar marca para filtrar la liquidación</label>
+                <input id="settlement-brand" type="search" role="combobox" aria-expanded={brandSearchOpen} aria-controls="settlement-brand-results" autoComplete="off" value={brandSearch} onFocus={() => setBrandSearchOpen(true)} onBlur={() => window.setTimeout(() => setBrandSearchOpen(false), 120)} onChange={(event) => { setBrandSearch(event.target.value); setBrandFilter(''); setPreviewBrandId(''); setBrandSearchOpen(true); }} onKeyDown={(event) => { if (event.key === 'Escape') setBrandSearchOpen(false); if (event.key === 'Enter' && brandSuggestions[0]) { event.preventDefault(); selectReportBrand(brandSuggestions[0]); } }} placeholder="Buscar marca..." className="w-full rounded-lg border border-outline-variant px-3 py-2 pr-9 text-sm" />
+                {brandSearch && <button type="button" aria-label="Limpiar búsqueda de marca" onMouseDown={(event) => event.preventDefault()} onClick={() => { setBrandSearch(''); setBrandFilter(''); setPreviewBrandId(''); setBrandSearchOpen(false); }} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-on-surface-variant hover:bg-surface-container-low"><span className="material-symbols-outlined text-base">close</span></button>}
+                {brandSearchOpen && brandSearch.trim() && <div id="settlement-brand-results" role="listbox" className="absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-y-auto rounded-xl border border-outline-variant bg-white p-1 shadow-xl">
+                  {brandSuggestions.length ? brandSuggestions.map((brand) => <button key={brand.marca_id} type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => selectReportBrand(brand)} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-primary-fixed/40">{brand.marca}</button>) : <p className="px-3 py-2 text-sm text-on-surface-variant">No se encontraron marcas.</p>}
+                </div>}
+              </div>
               <button type="button" onClick={() => setPreviewBrandId(brandFilter)} disabled={!brandFilter} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-on-primary disabled:opacity-50">Vista previa</button>
               <div className="flex gap-1">{['Todos', 'Pendiente', 'Pagado'].map((option) => <button key={option} type="button" onClick={() => setFilter(option)} className={`px-3 py-1 rounded-lg text-xs font-semibold ${filter === option ? 'bg-primary text-on-primary' : 'text-on-surface-variant'}`}>{option}</button>)}</div>
             </div>

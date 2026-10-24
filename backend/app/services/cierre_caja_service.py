@@ -52,6 +52,7 @@ class CierreCajaService:
         payments = _payments(db, day)
         amounts = {method.lower(): payments.get(method.lower(), Decimal("0.00")) for method in METHODS}
         if cierre:
+            reabierta = cierre.get("reabierta_en") and cierre["reabierta_en"] > cierre["cerrado_en"]
             expected = {
                 "efectivo": Decimal(cierre["esperado_efectivo"]),
                 "tarjeta": Decimal(cierre["esperado_tarjeta"]),
@@ -63,11 +64,12 @@ class CierreCajaService:
                 "transferencia": Decimal(cierre["contado_transferencia"]),
             }
             return {
-                "fecha": day.isoformat(), "cerrado": True,
+                "fecha": day.isoformat(), "cerrado": not reabierta,
                 "fondo_inicial": cierre["fondo_inicial"], "ventas": amounts,
                 "esperado": expected, "contado": contado,
                 "diferencias": {key: contado[key] - expected[key] for key in expected},
                 "observaciones": cierre["observaciones"], "cerrado_en": cierre["cerrado_en"],
+                "reabierta_en": cierre.get("reabierta_en"),
             }
         return {
             "fecha": day.isoformat(), "cerrado": False,
@@ -81,8 +83,8 @@ class CierreCajaService:
         day = business_day()
         try:
             lock_day(db, day)
-            existing = db.execute(text("SELECT id FROM cierres_caja WHERE fecha = :day"), {"day": day}).scalar()
-            if existing:
+            existing = db.execute(text("SELECT * FROM cierres_caja WHERE fecha = :day FOR UPDATE"), {"day": day}).mappings().first()
+            if existing and (not existing["reabierta_en"] or existing["reabierta_en"] <= existing["cerrado_en"]):
                 raise HTTPException(status_code=409, detail="La caja de hoy ya fue cerrada.")
             payments = _payments(db, day)
             opening = Decimal(str(values["fondo_inicial"]))
@@ -92,22 +94,50 @@ class CierreCajaService:
                 "transferencia": payments.get("transferencia", Decimal("0.00")),
             }
             counted = {key: Decimal(str(values[f"contado_{key}"])) for key in expected}
-            db.execute(text("""
-                INSERT INTO cierres_caja
-                (fecha, usuario_id, fondo_inicial, esperado_efectivo, esperado_tarjeta,
-                 esperado_transferencia, contado_efectivo, contado_tarjeta, contado_transferencia, observaciones)
-                VALUES (:fecha, :user_id, :fondo, :ee, :et, :etr, :ce, :ct, :ctr, :observaciones)
-            """), {
+            params = {
                 "fecha": day, "user_id": user_id, "fondo": opening,
                 "ee": expected["efectivo"], "et": expected["tarjeta"], "etr": expected["transferencia"],
                 "ce": counted["efectivo"], "ct": counted["tarjeta"], "ctr": counted["transferencia"],
                 "observaciones": values.get("observaciones"),
-            })
+            }
+            if existing:
+                db.execute(text("""
+                    UPDATE cierres_caja SET usuario_id=:user_id, fondo_inicial=:fondo,
+                    esperado_efectivo=:ee, esperado_tarjeta=:et, esperado_transferencia=:etr,
+                    contado_efectivo=:ce, contado_tarjeta=:ct, contado_transferencia=:ctr,
+                    observaciones=:observaciones, cerrado_en=CURRENT_TIMESTAMP
+                    WHERE id=:id
+                """), {**params, "id": existing["id"]})
+            else:
+                db.execute(text("""
+                INSERT INTO cierres_caja
+                (fecha, usuario_id, fondo_inicial, esperado_efectivo, esperado_tarjeta,
+                 esperado_transferencia, contado_efectivo, contado_tarjeta, contado_transferencia, observaciones)
+                VALUES (:fecha, :user_id, :fondo, :ee, :et, :etr, :ce, :ct, :ctr, :observaciones)
+                """), params)
             db.commit()
             return CierreCajaService.current(db)
         except HTTPException:
             db.rollback()
             raise
+        except Exception:
+            db.rollback()
+            raise
+
+    @staticmethod
+    def reopen(db: Session, user_id: int) -> dict:
+        day = business_day()
+        try:
+            lock_day(db, day)
+            cierre = db.execute(text("SELECT * FROM cierres_caja WHERE fecha = :day FOR UPDATE"), {"day": day}).mappings().first()
+            if not cierre or (cierre["reabierta_en"] and cierre["reabierta_en"] > cierre["cerrado_en"]):
+                raise HTTPException(status_code=409, detail="No hay un cierre vigente de hoy para reabrir.")
+            db.execute(text("""
+                UPDATE cierres_caja SET reabierta_en=CURRENT_TIMESTAMP, reabierta_por=:user_id
+                WHERE id=:id
+            """), {"user_id": user_id, "id": cierre["id"]})
+            db.commit()
+            return CierreCajaService.current(db)
         except Exception:
             db.rollback()
             raise

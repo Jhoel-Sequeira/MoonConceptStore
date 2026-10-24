@@ -23,3 +23,11 @@ def close_caja(
     user: Usuario = Depends(get_current_user),
 ):
     return CierreCajaService.close(db, user.id, values.model_dump())
+
+
+@router.post("/reabrir")
+def reopen_caja(
+    db: Session = Depends(get_db),
+    user: Usuario = Depends(get_current_user),
+):
+    return CierreCajaService.reopen(db, user.id)

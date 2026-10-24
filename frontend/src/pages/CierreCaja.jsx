@@ -47,7 +47,8 @@ export default function CierreCajaPage() {
 
   const submit = async (event) => {
     event.preventDefault();
-    if (!(await confirm('¿Confirmas el cierre de caja? No se podrán registrar más ventas hoy.', { title: 'Cerrar caja', confirmLabel: 'Confirmar cierre' }))) return;
+    const reemplaza = Boolean(cierre?.reabierta_en);
+    if (!(await confirm(reemplaza ? '¿Confirmas el nuevo cierre? Este reemplazará los montos del cierre anterior.' : '¿Confirmas el cierre de caja? No se podrán registrar más ventas hoy.', { title: reemplaza ? 'Actualizar cierre' : 'Cerrar caja', confirmLabel: reemplaza ? 'Actualizar cierre' : 'Confirmar cierre' }))) return;
     setSaving(true);
     setError('');
     try {
@@ -59,9 +60,27 @@ export default function CierreCajaPage() {
         observaciones: observaciones.trim() || null,
       });
       setCierre(result);
-      notify('La caja quedó cerrada por hoy.', 'success');
+      notify(reemplaza ? 'El cierre de caja fue actualizado.' : 'La caja quedó cerrada por hoy.', 'success');
     } catch (err) {
       setError(err.response?.data?.detail || 'No se pudo cerrar la caja.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reopen = async () => {
+    if (!(await confirm('Se habilitarán nuevamente las ventas de hoy. Al cerrar otra vez, el cierre actual será reemplazado.', { title: 'Reabrir caja', confirmLabel: 'Reabrir caja' }))) return;
+    setSaving(true);
+    setError('');
+    try {
+      const result = await finanzasService.reabrirCaja();
+      setCierre(result);
+      setFondo('');
+      setContado({ efectivo: '', tarjeta: '', transferencia: '' });
+      setObservaciones('');
+      notify('La caja está abierta nuevamente para hoy.', 'success');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'No se pudo reabrir la caja.');
     } finally {
       setSaving(false);
     }
@@ -117,7 +136,7 @@ export default function CierreCajaPage() {
             <label htmlFor="observaciones" className="block font-semibold text-sm text-on-surface mb-2">Observaciones</label>
             <textarea id="observaciones" rows={3} maxLength={2000} disabled={isClosed} value={observaciones} onChange={(e) => setObservaciones(e.target.value)} className="w-full p-3 bg-surface-container-low rounded-lg text-sm disabled:opacity-70" placeholder="Notas de diferencias o entrega de efectivo" />
           </section>
-          {isClosed ? <button type="button" onClick={() => window.print()} className="self-end px-4 py-2 rounded-lg bg-primary text-on-primary font-semibold">Imprimir cierre</button> : (
+          {isClosed ? <div className="self-end flex gap-3"><button type="button" onClick={() => window.print()} className="px-4 py-2 rounded-lg border border-outline-variant font-semibold">Imprimir cierre</button><button type="button" disabled={saving} onClick={reopen} className="px-4 py-2 rounded-lg bg-primary text-on-primary font-semibold disabled:opacity-50">Reabrir caja</button></div> : (
             <button disabled={saving || !fondo} type="submit" className="self-end px-4 py-2 rounded-lg bg-primary text-on-primary font-semibold disabled:opacity-50">
               {saving ? 'Cerrando…' : 'Confirmar cierre de caja'}
             </button>

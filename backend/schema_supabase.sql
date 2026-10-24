@@ -79,6 +79,8 @@ CREATE TABLE public.cierres_caja (
   contado_transferencia numeric(12,2) NOT NULL CHECK (contado_transferencia >= 0),
   observaciones text,
   cerrado_en timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  reabierta_en timestamp without time zone,
+  reabierta_por integer,
   CONSTRAINT cierres_caja_pkey PRIMARY KEY (id)
 );
 
@@ -376,6 +378,8 @@ ALTER TABLE public.compra_detalles ADD CONSTRAINT compra_detalles_compra_id_fkey
 ALTER TABLE public.compra_detalles ADD CONSTRAINT compra_detalles_producto_id_fkey FOREIGN KEY (producto_id) REFERENCES productos(id);
 
 ALTER TABLE public.cierres_caja ADD CONSTRAINT fk_cierres_caja_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id);
+
+ALTER TABLE public.cierres_caja ADD CONSTRAINT fk_cierres_caja_reabierta_por FOREIGN KEY (reabierta_por) REFERENCES usuarios(id);
 
 ALTER TABLE public.compras ADD CONSTRAINT fk_compras_marca FOREIGN KEY (marca_id) REFERENCES marcas(id) ON DELETE SET NULL;
 
