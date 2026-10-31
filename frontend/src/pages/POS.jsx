@@ -718,7 +718,7 @@ export default function POSPage() {
                   </div>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between gap-2"><span className="text-on-surface-variant">Subtotal de productos</span><strong>{formatCordobas(totalCents / 100)}</strong></div>
-                    <div className="flex justify-between gap-2"><span className="text-on-surface-variant">Comisión POS ({commissionRate}%, a cargo de la marca)</span><strong>{formatCordobas(cardCommissionCents / 100)}</strong></div>
+                    <div className="flex justify-between gap-2"><span className="text-on-surface-variant">Comisión POS</span><strong>{formatCordobas(cardCommissionCents / 100)}</strong></div>
                     <div className="flex justify-between gap-2 border-t border-surface-container-high pt-2 font-bold text-primary"><span>Total que paga el cliente</span><strong>{formatCordobas(totalCents / 100)}</strong></div>
                   </div>
                   <button type="button" disabled={processingSale || savingCommissionRate} onClick={() => handleCompleteSale('Tarjeta')} className="mt-3 w-full rounded-lg bg-primary px-3 py-2.5 text-sm font-bold text-on-primary disabled:opacity-50">Confirmar y cobrar {formatCordobas(totalCents / 100)}</button>
@@ -776,6 +776,7 @@ export default function POSPage() {
               <h2 className="font-sans text-lg font-semibold">{brandConfig?.name || 'Tienda'}</h2>
               <p className="mt-1 text-[10px]">#{String(invoice.id).padStart(6, '0')}</p>
               <p className="mt-2 text-[10px]">{formatInvoiceDate(invoice.fecha_venta)}</p>
+              {invoice.cliente && invoice.cliente !== 'Consumidor Final' && <p className="mt-2 break-words text-[10px]">Cliente: {invoice.cliente}</p>}
             </header>
             <div className="grid grid-cols-[1fr_34px_52px_56px] gap-1 border-b border-[#d8c9bf] py-2 text-[9px] font-bold uppercase">
               <span>Producto</span><span className="text-right">Cant.</span><span className="text-right">Precio</span><span className="text-right">Total</span>
