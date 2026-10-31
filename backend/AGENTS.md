@@ -9,5 +9,5 @@
 - Sales history is exposed at `GET /api/v1/pos/ventas/historial`; keep its date filters in the Managua business timezone, and preserve brand, payment-method, customer/product search, pagination, and sale-item detail.
 - Client records use `nombre_cliente`, `telefono`, `correo`, and optional `fecha_nacimiento`. POS sales must use the selected client ID; when none is selected, use the shared `Consumidor Final` customer because `ventas.cliente_id` is required.
 - Receipt imports can regenerate a printable QR PDF at `GET /api/v1/recepcion/{ingreso_id}/qr-pdf`; generate from products attached to that import and preserve their existing QR values.
-- Individual QR PNGs and printable PDF labels share a white rounded-card layout with centered QR, product name, SKU, and bold C$ price; preserve the existing QR payload.
+- Individual QR PNGs and printable PDF labels share a white rounded-card layout with centered QR, product name, SKU, and bold C$ price; preserve the existing QR payload and use scalable font fallbacks when system fonts are missing.
 - Inventory search accepts SKU, name, QR code, and description; keep the global header and inventory page searches wired to that endpoint.

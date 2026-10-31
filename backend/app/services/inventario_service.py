@@ -290,25 +290,43 @@ class InventarioService:
         qr.add_data(data_text)
         qr.make(fit=True)
         qr_image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        serif_bold_paths = ("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf", "C:/Windows/Fonts/georgiab.ttf")
+        serif_bold_paths = (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSerif-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf",
+            "C:/Windows/Fonts/georgiab.ttf",
+        )
         regular_paths = (
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
             "C:/Windows/Fonts/calibril.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "C:/Windows/Fonts/arial.ttf",
         )
-        bold_paths = ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "C:/Windows/Fonts/arialbd.ttf")
-        title_path = next((path for path in serif_bold_paths if os.path.exists(path)), None)
-        regular_path = next((path for path in regular_paths if os.path.exists(path)), None)
-        bold_path = next((path for path in bold_paths if os.path.exists(path)), None)
-        try:
-            if not title_path or not regular_path or not bold_path:
-                raise OSError("No se encontraron las fuentes para la etiqueta QR")
-            title_font = ImageFont.truetype(title_path, 54)
-            detail_font = ImageFont.truetype(regular_path, 30)
-            price_font = ImageFont.truetype(bold_path, 44)
-        except (OSError, StopIteration):
-            title_font = detail_font = price_font = ImageFont.load_default()
+        bold_paths = (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+            "C:/Windows/Fonts/arialbd.ttf",
+        )
+
+        def load_label_font(paths, size):
+            for path in paths:
+                if os.path.exists(path):
+                    try:
+                        return ImageFont.truetype(path, size), False
+                    except OSError:
+                        continue
+            # ponytail: Pillow 10.1+ supplies a scalable built-in font when OS fonts are unavailable.
+            return ImageFont.load_default(size=size), True
+
+        title_font, title_fallback = load_label_font(serif_bold_paths, 54)
+        detail_font, detail_fallback = load_label_font(regular_paths, 30)
+        price_font, price_fallback = load_label_font(bold_paths, 44)
 
         width, height = 900, 690
         card = Image.new("RGB", (width, height), "#f6f6f6")
@@ -320,19 +338,19 @@ class InventarioService:
 
         title = name or "Producto"
         title_size = 54
-        while title_path and title_size > 30 and draw.textbbox((0, 0), title, font=title_font)[2] > 760:
+        while title_size > 30 and draw.textbbox((0, 0), title, font=title_font)[2] > 760:
             title_size -= 2
-            title_font = ImageFont.truetype(title_path, title_size)
+            title_font, title_fallback = load_label_font(serif_bold_paths, title_size)
         sku_label = f"SKU: {sku}"
         detail_size = 30
-        while regular_path and detail_size > 24 and draw.textbbox((0, 0), sku_label, font=detail_font)[2] > 760:
+        while detail_size > 24 and draw.textbbox((0, 0), sku_label, font=detail_font)[2] > 760:
             detail_size -= 2
-            detail_font = ImageFont.truetype(regular_path, detail_size)
-        draw.text((center_x, 430), title, fill="#111111", font=title_font, anchor="mt")
+            detail_font, detail_fallback = load_label_font(regular_paths, detail_size)
+        draw.text((center_x, 430), title, fill="#111111", font=title_font, anchor="mt", stroke_width=1 if title_fallback else 0, stroke_fill="#111111")
         draw.line((315, 490, 585, 490), fill="#d2d2d2", width=3)
         draw.text((center_x, 506), sku_label, fill="#555555", font=detail_font, anchor="mt")
         draw.line((315, 560, 585, 560), fill="#d2d2d2", width=3)
-        draw.text((center_x, 578), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt")
+        draw.text((center_x, 578), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt", stroke_width=1 if price_fallback else 0, stroke_fill="#111111")
         img = card
         buf = io.BytesIO()
         img.save(buf, format="PNG")

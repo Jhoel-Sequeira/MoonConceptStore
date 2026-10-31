@@ -12,7 +12,7 @@ passlib==1.7.4
 bcrypt==4.0.1
 python-multipart
 qrcode[pil]
-pillow
+pillow>=10.1.0
 openpyxl>=3.1,<4
 python-dotenv
 supabase==2.33.0
