@@ -79,3 +79,4 @@ assert sheet["J12"].value == 2.0 and sheet["K12"].value == 8.0
 sales_sheet = load_workbook(BytesIO(workbook_bytes), data_only=True)["Ventas_Detalladas"]
 assert sales_sheet["A2"].value == 17 and sales_sheet["C2"].value == "Cliente Demo"
 assert sales_sheet["F2"].value == "Producto Demo" and sales_sheet["J2"].value == 10.0
+assert sales_sheet["B2"].value.hour == 12 and sales_sheet["B2"].value.tzinfo is None

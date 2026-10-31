@@ -387,7 +387,8 @@ class LiquidacionesService:
             sales_ws.column_dimensions[get_column_letter(column)].width = width
         sales_ws.row_dimensions[1].height = 34
         for row_index, sale_line in enumerate(sales, start=2):
-            sale_date = sale_line["fecha_venta"].replace(tzinfo=timezone.utc).astimezone(MANAGUA)
+            # ponytail: Excel stores the Managua wall time without timezone metadata.
+            sale_date = sale_line["fecha_venta"].replace(tzinfo=timezone.utc).astimezone(MANAGUA).replace(tzinfo=None)
             values = [sale_line["venta_id"], sale_date, sale_line["cliente"], sale_line["metodos_pago"],
                       sale_line["sku"] or "—", sale_line["producto"], sale_line["cantidad"],
                       sale_line["precio_unitario"], sale_line["descuento"], sale_line["subtotal"], sale_line["total_venta"]]
