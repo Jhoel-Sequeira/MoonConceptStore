@@ -15,13 +15,14 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.drawing.image import Image as OpenpyxlImage
-from PIL import Image as PILImage, ImageDraw, ImageFont
+from PIL import Image as PILImage
 from app.models.marcas import Marca, Cuenta
 from app.models.inventario import Kardex, Producto
 from app.models.ingresos import Ingreso, IngresoDetalle
 from app.schemas.marcas import MarcaCreate, MarcaUpdate
 from app.core.storage import delete_image, download_image, upload_image
 from app.core.categories import CATEGORY_FIELDS, normalize_category, validate_category_details
+from app.services.inventario_service import InventarioService
 
 DELIVERY_TEMPLATE_VERSION = 7
 DELIVERY_BASE_HEADERS = (
@@ -798,57 +799,26 @@ class MarcasService:
 
     @staticmethod
     def generate_import_qr_pdf(productos_procesados: list) -> bytes:
-        import qrcode
-
-        # ponytail: rasterizar una hoja carta con Pillow evita añadir una dependencia PDF.
+        # ponytail: rasterizar una hoja carta con Pillow evita a?adir una dependencia PDF.
         page_width, page_height = 1275, 1650  # Carta a 150 DPI
         columns, rows_per_page = 2, 4
         cell_width, cell_height = page_width // columns, page_height // rows_per_page
-        font_paths = (
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-            "C:/Windows/Fonts/arial.ttf",
-        )
-        bold_font_paths = (
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-            "C:/Windows/Fonts/arialbd.ttf",
-        )
-        try:
-            font_path = next(path for path in font_paths if os.path.exists(path))
-            bold_font_path = next(path for path in bold_font_paths if os.path.exists(path))
-            title_font = ImageFont.truetype(font_path, 28)
-            detail_font = ImageFont.truetype(font_path, 22)
-            price_font = ImageFont.truetype(bold_font_path, 24)
-            ascii_fallback = False
-        except (OSError, StopIteration):
-            title_font = detail_font = ImageFont.load_default()
-            price_font = ImageFont.load_default()
-            ascii_fallback = True
-
         pages = []
         for page_start in range(0, len(productos_procesados), columns * rows_per_page):
             page = PILImage.new("RGB", (page_width, page_height), "white")
-            draw = ImageDraw.Draw(page)
             page_items = productos_procesados[page_start:page_start + columns * rows_per_page]
             for index, (producto, _) in enumerate(page_items):
                 column, row = index % columns, index // columns
                 left, top = column * cell_width, row * cell_height
-                qr = qrcode.make(producto.codigo_qr or f"BHPOS-{producto.sku}").convert("RGB")
-                qr.thumbnail((280, 280))
-                qr_left = left + (cell_width - qr.width) // 2
-                page.paste(qr, (qr_left, top + 20))
-                center_x = left + cell_width // 2
-                name = producto.nombre or "Producto"
-                sku = f"SKU: {producto.sku}"
-                if ascii_fallback:
-                    import unicodedata
-                    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
-                    sku = unicodedata.normalize("NFKD", sku).encode("ascii", "ignore").decode("ascii")
-                draw.text((center_x, top + 315), name, fill="black", font=title_font, anchor="mt")
-                draw.text((center_x, top + 355), sku, fill="black", font=detail_font, anchor="mt")
-                draw.text((center_x, top + 390), f"C$ {producto.precio:,.2f}", fill="black", font=price_font, anchor="mt")
-                draw.rectangle((left + 12, top + 12, left + cell_width - 12, top + cell_height - 12), outline="#cccccc", width=2)
+                label_content = InventarioService.generate_qr_image(
+                    producto.codigo_qr or f"BHPOS-{producto.sku}",
+                    producto.nombre,
+                    producto.sku,
+                    producto.precio,
+                )
+                with PILImage.open(label_content) as label:
+                    label.thumbnail((cell_width - 28, cell_height - 28))
+                    page.paste(label, (left + (cell_width - label.width) // 2, top + (cell_height - label.height) // 2))
             pages.append(page)
 
         output = io.BytesIO()

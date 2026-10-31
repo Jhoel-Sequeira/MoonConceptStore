@@ -280,7 +280,7 @@ class InventarioService:
         return True
 
     @staticmethod
-    def generate_qr_image(data_text: str, price=None) -> io.BytesIO:
+    def generate_qr_image(data_text: str, name: str, sku: str, price=None) -> io.BytesIO:
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_M,
@@ -289,21 +289,46 @@ class InventarioService:
         )
         qr.add_data(data_text)
         qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        if price is not None:
-            font_paths = ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "C:/Windows/Fonts/arialbd.ttf")
-            try:
-                font = ImageFont.truetype(next(path for path in font_paths if os.path.exists(path)), 28)
-            except (OSError, StopIteration):
-                font = ImageFont.load_default()
-            label = f"C$ {price:,.2f}"
-            draw = ImageDraw.Draw(img)
-            bounds = draw.textbbox((0, 0), label, font=font)
-            label_height = bounds[3] - bounds[1]
-            canvas = Image.new("RGB", (img.width, img.height + label_height + 24), "white")
-            canvas.paste(img, (0, 0))
-            ImageDraw.Draw(canvas).text(((img.width - (bounds[2] - bounds[0])) // 2, img.height + 8), label, fill="black", font=font)
-            img = canvas
+        qr_image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+        serif_bold_paths = ("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf", "C:/Windows/Fonts/georgiab.ttf")
+        regular_paths = ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:/Windows/Fonts/arial.ttf")
+        bold_paths = ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "C:/Windows/Fonts/arialbd.ttf")
+        title_path = next((path for path in serif_bold_paths if os.path.exists(path)), None)
+        regular_path = next((path for path in regular_paths if os.path.exists(path)), None)
+        bold_path = next((path for path in bold_paths if os.path.exists(path)), None)
+        try:
+            if not title_path or not regular_path or not bold_path:
+                raise OSError("No se encontraron las fuentes para la etiqueta QR")
+            title_font = ImageFont.truetype(title_path, 48)
+            detail_font = ImageFont.truetype(regular_path, 36)
+            price_font = ImageFont.truetype(bold_path, 52)
+        except (OSError, StopIteration):
+            title_font = detail_font = price_font = ImageFont.load_default()
+
+        width, height = 900, 640
+        card = Image.new("RGB", (width, height), "white")
+        draw = ImageDraw.Draw(card)
+        draw.rounded_rectangle((14, 14, width - 14, height - 14), radius=36, outline="#d2d2d2", width=4)
+        qr_image.thumbnail((288, 288))
+        center_x = width // 2
+        card.paste(qr_image, ((width - qr_image.width) // 2, 36))
+
+        title = name or "Producto"
+        title_size = 48
+        while title_path and title_size > 30 and draw.textbbox((0, 0), title, font=title_font)[2] > width - 96:
+            title_size -= 2
+            title_font = ImageFont.truetype(title_path, title_size)
+        sku_label = f"SKU: {sku}"
+        detail_size = 36
+        while regular_path and detail_size > 24 and draw.textbbox((0, 0), sku_label, font=detail_font)[2] > width - 96:
+            detail_size -= 2
+            detail_font = ImageFont.truetype(regular_path, detail_size)
+        draw.text((center_x, 350), title, fill="#111111", font=title_font, anchor="mt")
+        draw.line((270, 414, 630, 414), fill="#d2d2d2", width=3)
+        draw.text((center_x, 432), sku_label, fill="#555555", font=detail_font, anchor="mt")
+        draw.line((270, 496, 630, 496), fill="#d2d2d2", width=3)
+        draw.text((center_x, 512), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt")
+        img = card
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
