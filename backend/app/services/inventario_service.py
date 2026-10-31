@@ -291,7 +291,12 @@ class InventarioService:
         qr.make(fit=True)
         qr_image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
         serif_bold_paths = ("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf", "C:/Windows/Fonts/georgiab.ttf")
-        regular_paths = ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:/Windows/Fonts/arial.ttf")
+        regular_paths = (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf",
+            "C:/Windows/Fonts/calibril.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+        )
         bold_paths = ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "C:/Windows/Fonts/arialbd.ttf")
         title_path = next((path for path in serif_bold_paths if os.path.exists(path)), None)
         regular_path = next((path for path in regular_paths if os.path.exists(path)), None)
@@ -301,7 +306,7 @@ class InventarioService:
                 raise OSError("No se encontraron las fuentes para la etiqueta QR")
             title_font = ImageFont.truetype(title_path, 54)
             detail_font = ImageFont.truetype(regular_path, 30)
-            price_font = ImageFont.truetype(bold_path, 48)
+            price_font = ImageFont.truetype(bold_path, 44)
         except (OSError, StopIteration):
             title_font = detail_font = price_font = ImageFont.load_default()
 
