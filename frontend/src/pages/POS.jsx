@@ -776,7 +776,7 @@ export default function POSPage() {
               <h2 className="font-sans text-lg font-semibold">{brandConfig?.name || 'Tienda'}</h2>
               <p className="mt-1 text-[10px]">#{String(invoice.id).padStart(6, '0')}</p>
               <p className="mt-2 text-[10px]">{formatInvoiceDate(invoice.fecha_venta)}</p>
-              {invoice.cliente && invoice.cliente !== 'Consumidor Final' && <p className="mt-2 break-words text-[10px]">Cliente: {invoice.cliente}</p>}
+              {invoice.cliente && invoice.cliente !== 'Consumidor Final' && <p className="mt-2 break-words text-left text-[10px]">Cliente: {invoice.cliente}</p>}
             </header>
             <div className="grid grid-cols-[1fr_34px_52px_56px] gap-1 border-b border-[#d8c9bf] py-2 text-[9px] font-bold uppercase">
               <span>Producto</span><span className="text-right">Cant.</span><span className="text-right">Precio</span><span className="text-right">Total</span>

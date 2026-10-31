@@ -299,35 +299,35 @@ class InventarioService:
         try:
             if not title_path or not regular_path or not bold_path:
                 raise OSError("No se encontraron las fuentes para la etiqueta QR")
-            title_font = ImageFont.truetype(title_path, 48)
-            detail_font = ImageFont.truetype(regular_path, 36)
-            price_font = ImageFont.truetype(bold_path, 52)
+            title_font = ImageFont.truetype(title_path, 54)
+            detail_font = ImageFont.truetype(regular_path, 30)
+            price_font = ImageFont.truetype(bold_path, 48)
         except (OSError, StopIteration):
             title_font = detail_font = price_font = ImageFont.load_default()
 
-        width, height = 900, 640
-        card = Image.new("RGB", (width, height), "white")
+        width, height = 900, 690
+        card = Image.new("RGB", (width, height), "#f6f6f6")
         draw = ImageDraw.Draw(card)
-        draw.rounded_rectangle((14, 14, width - 14, height - 14), radius=36, outline="#d2d2d2", width=4)
-        qr_image.thumbnail((288, 288))
+        draw.rounded_rectangle((48, 30, width - 48, height - 30), radius=28, fill="white", outline="#d2d2d2", width=4)
+        qr_image.thumbnail((320, 320))
         center_x = width // 2
-        card.paste(qr_image, ((width - qr_image.width) // 2, 36))
+        card.paste(qr_image, ((width - qr_image.width) // 2, 78))
 
         title = name or "Producto"
-        title_size = 48
-        while title_path and title_size > 30 and draw.textbbox((0, 0), title, font=title_font)[2] > width - 96:
+        title_size = 54
+        while title_path and title_size > 30 and draw.textbbox((0, 0), title, font=title_font)[2] > 760:
             title_size -= 2
             title_font = ImageFont.truetype(title_path, title_size)
         sku_label = f"SKU: {sku}"
-        detail_size = 36
-        while regular_path and detail_size > 24 and draw.textbbox((0, 0), sku_label, font=detail_font)[2] > width - 96:
+        detail_size = 30
+        while regular_path and detail_size > 24 and draw.textbbox((0, 0), sku_label, font=detail_font)[2] > 760:
             detail_size -= 2
             detail_font = ImageFont.truetype(regular_path, detail_size)
-        draw.text((center_x, 350), title, fill="#111111", font=title_font, anchor="mt")
-        draw.line((270, 414, 630, 414), fill="#d2d2d2", width=3)
-        draw.text((center_x, 432), sku_label, fill="#555555", font=detail_font, anchor="mt")
-        draw.line((270, 496, 630, 496), fill="#d2d2d2", width=3)
-        draw.text((center_x, 512), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt")
+        draw.text((center_x, 430), title, fill="#111111", font=title_font, anchor="mt")
+        draw.line((315, 490, 585, 490), fill="#d2d2d2", width=3)
+        draw.text((center_x, 506), sku_label, fill="#555555", font=detail_font, anchor="mt")
+        draw.line((315, 560, 585, 560), fill="#d2d2d2", width=3)
+        draw.text((center_x, 578), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt")
         img = card
         buf = io.BytesIO()
         img.save(buf, format="PNG")
