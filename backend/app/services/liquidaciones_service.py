@@ -404,6 +404,27 @@ class LiquidacionesService:
                     cell.number_format = '"C$"#,##0.00'
             sales_ws.row_dimensions[row_index].height = 25
         if sales:
+            totals_row = len(sales) + 2
+            unique_sales = {row["venta_id"]: _decimal(row["total_venta"]) for row in sales}
+            sales_ws.merge_cells(start_row=totals_row, start_column=1, end_row=totals_row, end_column=6)
+            total_label = sales_ws.cell(totals_row, 1, "TOTALES")
+            total_label.alignment = Alignment(horizontal="right", vertical="center")
+            total_label.font = Font(name="Segoe UI", size=9, bold=True, color=white)
+            for column, amount in (
+                (7, sum(int(row["cantidad"]) for row in sales)),
+                (9, sum((_decimal(row["descuento"]) for row in sales), Decimal("0"))),
+                (10, sum((_decimal(row["subtotal"]) for row in sales), Decimal("0"))),
+                (11, sum(unique_sales.values(), Decimal("0"))),
+            ):
+                cell = sales_ws.cell(totals_row, column, float(amount) if isinstance(amount, Decimal) else amount)
+                cell.number_format = "0" if column == 7 else '"C$"#,##0.00'
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+                cell.font = Font(name="Segoe UI", size=9, bold=True, color=white)
+            for row in sales_ws.iter_rows(min_row=totals_row, max_row=totals_row, min_col=1, max_col=11):
+                for cell in row:
+                    cell.fill = PatternFill("solid", fgColor=gold)
+                    cell.border = border
+            sales_ws.row_dimensions[totals_row].height = 27
             sales_ws.auto_filter.ref = f"A1:K{len(sales) + 1}"
         sales_ws.sheet_properties.pageSetUpPr.fitToPage = True
         sales_ws.page_setup.fitToWidth = 1
