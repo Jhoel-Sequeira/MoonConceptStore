@@ -732,7 +732,7 @@ export default function POSPage() {
                 <span className="flex items-center gap-2">
                   <span className="material-symbols-outlined">account_balance</span> Transferencia
                 </span>
-                <span>BAC / Lafise</span>
+                <span></span>
               </button>
             </div>
             <button

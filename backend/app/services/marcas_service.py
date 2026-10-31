@@ -3,6 +3,7 @@ from sqlalchemy import func, text
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
+from types import SimpleNamespace
 import io
 import logging
 import os
@@ -21,7 +22,7 @@ from app.models.inventario import Kardex, Producto
 from app.models.ingresos import Ingreso, IngresoDetalle
 from app.schemas.marcas import MarcaCreate, MarcaUpdate
 from app.core.storage import delete_image, download_image, upload_image
-from app.core.categories import CATEGORY_FIELDS, normalize_category, validate_category_details
+from app.core.categories import CATEGORY_FIELDS, PRODUCT_CATEGORIES, normalize_category, validate_category_details
 from app.services.inventario_service import InventarioService
 
 DELIVERY_TEMPLATE_VERSION = 7
@@ -310,12 +311,18 @@ class MarcasService:
         return MarcasService.get_by_id(db, marca.id)
 
     @staticmethod
-    def generate_delivery_sheet(db: Session, marca_id: int):
-        marca = db.query(Marca).filter(Marca.id == marca_id).first()
-        if not marca:
-            return None, None
-
-        category = normalize_category(marca.categoria)
+    def generate_delivery_sheet(db: Session, marca_id: Optional[int], category: Optional[str] = None, generic: bool = False):
+        if generic:
+            category = normalize_category(category)
+            marca = SimpleNamespace(
+                id=None, codigo="GEN", categoria=category, logo=None,
+                nombre_marca="Plantilla genérica", nombre_representante="", email="", telefono="",
+            )
+        else:
+            marca = db.query(Marca).filter(Marca.id == marca_id).first()
+            if not marca:
+                return None, None
+            category = normalize_category(marca.categoria)
         category_fields = CATEGORY_FIELDS.get(category, ())
         headers = [*DELIVERY_BASE_HEADERS, *(label.upper() for _, label in category_fields)]
         category_start_col = len(DELIVERY_BASE_HEADERS) + 1
@@ -387,16 +394,17 @@ class MarcasService:
         ws["B2"].font = Font(name="Segoe UI", size=16, bold=True, color=ink)
         ws["B2"].alignment = Alignment(vertical="center")
         ws.merge_cells("B3:G3")
-        ws["B3"] = f"Inventario para {marca.nombre_marca} · {marca.codigo or 'MARCA'}"
+        ws["B3"] = (f"Plantilla genérica · cualquier marca de {category}" if generic
+                     else f"Inventario para {marca.nombre_marca} · {marca.codigo or 'MARCA'}")
         ws["B3"].font = Font(name="Segoe UI", size=10, color=muted)
         ws["B3"].alignment = Alignment(vertical="center")
         ws.merge_cells("H2:J2")
-        ws["H2"] = "IMPORTACIÓN PERSONALIZADA"
+        ws["H2"] = "IMPORTACIÓN GENÉRICA" if generic else "IMPORTACIÓN PERSONALIZADA"
         ws["H2"].font = Font(name="Segoe UI", size=9, bold=True, color=ink)
         ws["H2"].fill = PatternFill("solid", fgColor=blush)
         ws["H2"].alignment = Alignment(horizontal="center", vertical="center")
         ws.merge_cells("H3:J3")
-        ws["H3"] = f"Código {marca.codigo or '—'}  —  {datetime.now().strftime('%d/%m/%Y')}"
+        ws["H3"] = f"Rubro {category}  —  {datetime.now().strftime('%d/%m/%Y')}" if generic else f"Código {marca.codigo or '—'}  —  {datetime.now().strftime('%d/%m/%Y')}"
         ws["H3"].font = Font(name="Segoe UI", size=9, color=muted)
         ws["H3"].fill = PatternFill("solid", fgColor=gold_light)
         ws["H3"].alignment = Alignment(horizontal="center", vertical="center")
@@ -409,7 +417,7 @@ class MarcasService:
         for col in range(1, 11):
             ws.cell(5, col).border = border
         details = [
-            ("A6", "Marca"), ("B6", marca.nombre_marca), ("D6", "Código"), ("E6", marca.codigo or "—"),
+            ("A6", "Marca"), ("B6", "Cualquier marca del rubro" if generic else marca.nombre_marca), ("D6", "Código"), ("E6", "—" if generic else marca.codigo or "—"),
             ("G6", "Categoría"), ("H6", marca.categoria or "General"),
             ("A7", "Representante"), ("B7", marca.nombre_representante or "—"),
             ("D7", "Correo"), ("E7", marca.email or "—"), ("G7", "Teléfono"), ("H7", marca.telefono or "—"),
@@ -504,7 +512,7 @@ class MarcasService:
         guide.column_dimensions["B"].width = 29
         guide.column_dimensions["C"].width = 100
         guide.merge_cells("B2:C2")
-        guide["B2"] = f"GUÍA DE CARGA — {category.upper()} · {marca.nombre_marca.upper()}"
+        guide["B2"] = f"GUÍA DE CARGA — {category.upper()} · {'PLANTILLA GENÉRICA' if generic else marca.nombre_marca.upper()}"
         guide["B2"].font = Font(name="Segoe UI", size=15, bold=True, color=ink)
         guide["B2"].fill = PatternFill("solid", fgColor=pink)
         guide["B2"].alignment = Alignment(vertical="center")
@@ -534,7 +542,7 @@ class MarcasService:
 
         meta = wb.create_sheet("_plantilla")
         for row, (key, value) in enumerate([
-            ("marca_id", marca.id), ("marca_codigo", marca.codigo or ""), ("version", DELIVERY_TEMPLATE_VERSION),
+            ("marca_id", None if generic else marca.id), ("marca_codigo", "" if generic else marca.codigo or ""), ("version", DELIVERY_TEMPLATE_VERSION),
             ("data_start", start_row), ("data_end", end_row), ("categoria", category),
         ], start=1):
             meta.cell(row, 1, key)
@@ -544,8 +552,17 @@ class MarcasService:
         wb.save(output)
         output.seek(0)
         category_slug = "_".join(category.replace("/", " ").split())
-        filename = f"Plantilla_Inventario_{category_slug}_{marca.codigo or 'MARCA'}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        filename = f"Plantilla_Inventario_{category_slug}_{'GENERICA' if generic else marca.codigo or 'MARCA'}_{datetime.now().strftime('%Y%m%d')}.xlsx"
         return output, filename
+
+    @staticmethod
+    def generate_all_category_templates() -> tuple[bytes, str]:
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for category in PRODUCT_CATEGORIES:
+                workbook, filename = MarcasService.generate_delivery_sheet(None, None, category, generic=True)
+                archive.writestr(filename, workbook.getvalue())
+        return output.getvalue(), f"Plantillas_Inventario_Todos_los_Rubros_{datetime.now().strftime('%Y%m%d')}.zip"
 
     @staticmethod
     def import_delivery_template(
@@ -565,8 +582,11 @@ class MarcasService:
         if "Plantilla_Inventario" not in wb.sheetnames or "_plantilla" not in wb.sheetnames:
             raise ValueError("La plantilla no corresponde al formato de importación de productos")
         meta = wb["_plantilla"]
-        if meta["A1"].value != "marca_id" or str(meta["B1"].value) != str(marca.id) or meta["B3"].value != DELIVERY_TEMPLATE_VERSION:
-            raise ValueError("La plantilla pertenece a otra marca o tiene una versión no compatible. Descarga una plantilla nueva.")
+        template_brand_id = meta["B1"].value if meta["A1"].value == "marca_id" else None
+        if meta["A1"].value != "marca_id" or meta["B3"].value != DELIVERY_TEMPLATE_VERSION:
+            raise ValueError("La plantilla no tiene una versión compatible. Descarga una plantilla nueva.")
+        if template_brand_id not in (None, "") and str(template_brand_id) != str(marca.id):
+            raise ValueError("La plantilla pertenece a otra marca. Descarga la plantilla de la marca seleccionada.")
 
         ws = wb["Plantilla_Inventario"]
         data_start, data_end = meta["B4"].value, meta["B5"].value

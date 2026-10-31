@@ -11,3 +11,4 @@
 - Receipt imports can regenerate a printable QR PDF at `GET /api/v1/recepcion/{ingreso_id}/qr-pdf`; generate from products attached to that import and preserve their existing QR values.
 - Individual QR PNGs and printable PDF labels share a white rounded-card layout with centered QR, product name, SKU, and bold C$ price; preserve the existing QR payload and use scalable font fallbacks when system fonts are missing.
 - Inventory search accepts SKU, name, QR code, and description; keep the global header and inventory page searches wired to that endpoint.
+- Generic inventory template downloads include one Excel per configured rubro in a ZIP. Each is reusable for any brand with the same rubro; preserve the rubro header checks when importing.

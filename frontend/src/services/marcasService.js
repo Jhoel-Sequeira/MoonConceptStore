@@ -55,6 +55,18 @@ export const marcasService = {
     window.URL.revokeObjectURL(url);
   },
 
+  downloadAllRubricTemplates: async () => {
+    const response = await api.get('/marcas/plantillas-rubros', { responseType: 'blob' });
+    const url = window.URL.createObjectURL(response.data);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'Plantillas_Inventario_Todos_los_Rubros.zip';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  },
+
   importProductTemplate: async (id, file) => {
     const formData = new FormData();
     formData.append('file', file);

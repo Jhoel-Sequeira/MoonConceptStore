@@ -51,6 +51,7 @@ export default function MarcasPage() {
   const [logoPreview, setLogoPreview] = useState(null);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
+  const [isDownloadingRubricTemplates, setIsDownloadingRubricTemplates] = useState(false);
   const [isImportingExcel, setIsImportingExcel] = useState(false);
 
   // Formulario del Modal adaptado a dbo.marcas y dbo.cuentas
@@ -219,6 +220,17 @@ export default function MarcasPage() {
     }
   };
 
+  const handleDownloadAllRubricTemplates = async () => {
+    setIsDownloadingRubricTemplates(true);
+    try {
+      await marcasService.downloadAllRubricTemplates();
+    } catch (err) {
+      notify("No se pudieron generar las plantillas: " + (err.response?.data?.detail || err.message), 'error');
+    } finally {
+      setIsDownloadingRubricTemplates(false);
+    }
+  };
+
   const handleImportProductTemplate = async (brand, file, input) => {
     if (!file) return;
     setIsImportingExcel(true);
@@ -382,6 +394,14 @@ export default function MarcasPage() {
 
         {/* Quick Actions Buttons */}
         <div className="flex items-center gap-2 self-start lg:self-center shrink-0">
+          <button
+            onClick={handleDownloadAllRubricTemplates}
+            disabled={isDownloadingRubricTemplates}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-semibold transition-all shadow-sm"
+          >
+            <span className="material-symbols-outlined text-[18px]">{isDownloadingRubricTemplates ? 'sync' : 'folder_zip'}</span>
+            <span>{isDownloadingRubricTemplates ? 'Generando...' : 'Plantillas de todos los rubros'}</span>
+          </button>
           <button
             onClick={handleDownloadCSV}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold transition-all shadow-sm"

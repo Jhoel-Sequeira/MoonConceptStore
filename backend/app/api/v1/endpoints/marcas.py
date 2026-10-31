@@ -18,6 +18,15 @@ def get_marcas(db: Session = Depends(get_db)):
     """Obtener listado de todas las marcas con sus métricas y cuentas bancarias"""
     return MarcasService.get_all(db)
 
+@router.get("/plantillas-rubros")
+def download_all_rubric_templates():
+    content, filename = MarcasService.generate_all_category_templates()
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 @router.get("/{marca_id}", response_model=MarcaResponse)
 def get_marca(marca_id: int, db: Session = Depends(get_db)):
     """Obtener detalle de una marca por ID"""
