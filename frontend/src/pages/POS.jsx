@@ -51,6 +51,9 @@ export default function POSPage() {
   const videoRef = useRef(null);
   const [invoice, setInvoice] = useState(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [commissionRate, setCommissionRate] = useState(6.75);
+  const [commissionRateDraft, setCommissionRateDraft] = useState('6.75');
+  const [savingCommissionRate, setSavingCommissionRate] = useState(false);
 
   // 1. Cargar productos desde la base de datos (Backend Python)
   const cargarProductos = async () => {
@@ -69,6 +72,18 @@ export default function POSPage() {
   useEffect(() => {
     cargarProductos();
   }, []);
+  useEffect(() => {
+    let active = true;
+    posService.getCommissionConfig().then((config) => {
+      if (!active) return;
+      const rate = Number(config.comision_tarjeta_porcentaje);
+      setCommissionRate(rate);
+      setCommissionRateDraft(String(rate));
+    }).catch((error) => {
+      if (active) notify(error.response?.data?.detail || 'No se pudo cargar la tasa de comisión POS.', 'error');
+    });
+    return () => { active = false; };
+  }, [notify]);
   useEffect(() => {
     if (!customerSearchOpen) return undefined;
     let active = true;
@@ -276,10 +291,29 @@ export default function POSPage() {
   const subtotal = cart.reduce((acc, item) => acc + item.precio * item.qty, 0);
   const totalItems = cart.reduce((acc, item) => acc + item.qty, 0);
   const totalCents = Math.round(subtotal * 100);
-  const cardCommissionCents = Math.round(totalCents * 5 / 100);
-  const cardTotalCents = totalCents + cardCommissionCents;
+  const cardCommissionCents = Math.round(totalCents * commissionRate / 100);
   const cashReceivedCents = Math.max(0, Math.round((Number(cashReceived.replace(',', '.')) || 0) * 100));
   const changeCents = Math.max(0, cashReceivedCents - totalCents);
+
+  const saveCommissionRate = async () => {
+    const rate = Number(commissionRateDraft.replace(',', '.'));
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100 || !/^\d{1,3}(?:[.,]\d{1,2})?$/.test(commissionRateDraft.trim())) {
+      notify('Ingresa una tasa entre 0% y 100%, con máximo dos decimales.', 'warning');
+      return;
+    }
+    try {
+      setSavingCommissionRate(true);
+      const config = await posService.saveCommissionConfig({ comision_tarjeta_porcentaje: rate });
+      const savedRate = Number(config.comision_tarjeta_porcentaje);
+      setCommissionRate(savedRate);
+      setCommissionRateDraft(String(savedRate));
+      notify('Tasa de comisión POS guardada.', 'success');
+    } catch (error) {
+      notify(error.response?.data?.detail || 'No se pudo guardar la tasa de comisión POS.', 'error');
+    } finally {
+      setSavingCommissionRate(false);
+    }
+  };
 
   // Procesar venta en el Backend Python
   const handleCompleteSale = async (metodo) => {
@@ -676,12 +710,18 @@ export default function POSPage() {
               </button>
               {cardPaymentOpen && (
                 <section aria-label="Comisión de terminal POS" className="rounded-xl border border-surface-container-high p-3">
+                  <div className="mb-3 flex items-end gap-2">
+                    <label htmlFor="pos-commission-rate" className="flex-1 text-xs font-medium text-on-surface-variant">Tasa POS global (%)
+                      <input id="pos-commission-rate" type="number" min="0" max="100" step="0.01" value={commissionRateDraft} disabled={savingCommissionRate} onChange={(event) => setCommissionRateDraft(event.target.value)} className="mt-1 w-full rounded-lg border border-surface-container-high bg-white px-3 py-2 text-sm text-on-surface" />
+                    </label>
+                    <button type="button" disabled={savingCommissionRate || commissionRateDraft === String(commissionRate)} onClick={saveCommissionRate} className="rounded-lg border border-surface-container-high px-3 py-2 text-xs font-semibold disabled:opacity-50">{savingCommissionRate ? 'Guardando…' : 'Guardar'}</button>
+                  </div>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between gap-2"><span className="text-on-surface-variant">Subtotal de productos</span><strong>{formatCordobas(totalCents / 100)}</strong></div>
-                    <div className="flex justify-between gap-2"><span className="text-on-surface-variant">Comisión terminal (5%)</span><strong>{formatCordobas(cardCommissionCents / 100)}</strong></div>
-                    <div className="flex justify-between gap-2 border-t border-surface-container-high pt-2 font-bold text-primary"><span>Total con tarjeta</span><strong>{formatCordobas(cardTotalCents / 100)}</strong></div>
+                    <div className="flex justify-between gap-2"><span className="text-on-surface-variant">Comisión POS ({commissionRate}%, a cargo de la marca)</span><strong>{formatCordobas(cardCommissionCents / 100)}</strong></div>
+                    <div className="flex justify-between gap-2 border-t border-surface-container-high pt-2 font-bold text-primary"><span>Total que paga el cliente</span><strong>{formatCordobas(totalCents / 100)}</strong></div>
                   </div>
-                  <button type="button" disabled={processingSale} onClick={() => handleCompleteSale('Tarjeta')} className="mt-3 w-full rounded-lg bg-primary px-3 py-2.5 text-sm font-bold text-on-primary disabled:opacity-50">Confirmar y cobrar {formatCordobas(cardTotalCents / 100)}</button>
+                  <button type="button" disabled={processingSale || savingCommissionRate} onClick={() => handleCompleteSale('Tarjeta')} className="mt-3 w-full rounded-lg bg-primary px-3 py-2.5 text-sm font-bold text-on-primary disabled:opacity-50">Confirmar y cobrar {formatCordobas(totalCents / 100)}</button>
                 </section>
               )}
               <button
@@ -715,7 +755,6 @@ export default function POSPage() {
             <div className="my-5 space-y-3 border-y border-[#eaded5] py-4 text-left text-xs">
               <div className="flex justify-between gap-3"><span className="text-on-surface-variant"># Factura</span><strong className="font-mono">{String(invoice.id).padStart(6, '0')}</strong></div>
               <div className="flex justify-between gap-3"><span className="text-on-surface-variant">Fecha</span><strong>{formatInvoiceDate(invoice.fecha_venta)}</strong></div>
-              {Number(invoice.comision_pos) > 0 && <div className="flex justify-between gap-3"><span className="text-on-surface-variant">Comisión terminal (5%)</span><strong>{formatCordobas(invoice.comision_pos)}</strong></div>}
               {invoice.efectivo_recibido !== null && <div className="flex justify-between gap-3"><span className="text-on-surface-variant">Efectivo recibido</span><strong>{formatCordobas(invoice.efectivo_recibido)}</strong></div>}
               {invoice.vuelto !== null && <div className="flex justify-between gap-3 font-bold text-primary"><span>Vuelto</span><strong>{formatCordobas(invoice.vuelto)}</strong></div>}
               <div className="flex justify-between gap-3"><span className="text-on-surface-variant">Método de pago</span><strong>{invoice.metodo_pago}</strong></div>
@@ -748,7 +787,6 @@ export default function POSPage() {
             </div>
             <div className="space-y-1 border-b border-dashed border-[#c9a46d]/50 py-3 text-[11px]">
               <div className="flex justify-between"><span>Subtotal</span><span>{formatCordobas(invoice.subtotal ?? invoice.total)}</span></div>
-              {Number(invoice.comision_pos) > 0 && <div className="flex justify-between"><span>Comisión terminal (5%)</span><span>{formatCordobas(invoice.comision_pos)}</span></div>}
               <div className="flex justify-between"><span>Descuento</span><span>{formatCordobas(0)}</span></div>
               <div className="flex justify-between pt-1 text-sm font-bold"><span>Total</span><span>{formatCordobas(invoice.total)}</span></div>
               {invoice.efectivo_recibido !== null && <div className="flex justify-between pt-1"><span>Efectivo recibido</span><span>{formatCordobas(invoice.efectivo_recibido)}</span></div>}

@@ -5,7 +5,10 @@ import clientesService from '../services/clientesService';
 import { formatCordobas } from '../utils/currency';
 import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
 
-const blankForm = { nombre_cliente: '', telefono: '', correo: '' };
+const blankForm = { nombre_cliente: '', telefono: '', correo: '', fecha_nacimiento: '' };
+const formatBirthDate = (value) => value
+  ? new Intl.DateTimeFormat('es-NI', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
+  : '—';
 
 export default function ClientesPage() {
   const location = useLocation();
@@ -58,6 +61,7 @@ export default function ClientesPage() {
       nombre_cliente: cliente.nombre_cliente || '',
       telefono: cliente.telefono || '',
       correo: cliente.correo || '',
+      fecha_nacimiento: cliente.fecha_nacimiento || '',
     });
   };
 
@@ -67,6 +71,7 @@ export default function ClientesPage() {
       nombre_cliente: form.nombre_cliente.trim(),
       telefono: form.telefono.trim() || null,
       correo: form.correo.trim() || null,
+      fecha_nacimiento: form.fecha_nacimiento || null,
     };
     if (!payload.nombre_cliente) return;
     try {
@@ -134,9 +139,9 @@ export default function ClientesPage() {
         </div>
         {clientes.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[680px] text-left text-sm">
+            <table className="w-full min-w-[800px] text-left text-sm">
               <thead className="bg-surface-container-low text-xs uppercase tracking-wide text-on-surface-variant">
-                <tr><th className="px-5 py-3">Cliente</th><th className="px-5 py-3">Teléfono</th><th className="px-5 py-3">Correo</th><th className="px-5 py-3 text-right">Compras</th><th className="px-5 py-3 text-right">Total</th><th className="px-5 py-3" /></tr>
+                <tr><th className="px-5 py-3">Cliente</th><th className="px-5 py-3">Teléfono</th><th className="px-5 py-3">Correo</th><th className="px-5 py-3">Nacimiento</th><th className="px-5 py-3 text-right">Compras</th><th className="px-5 py-3 text-right">Total</th><th className="px-5 py-3" /></tr>
               </thead>
               <tbody className="divide-y divide-surface-container-low">
                 {clientes.map((cliente) => (
@@ -144,6 +149,7 @@ export default function ClientesPage() {
                     <td className="px-5 py-4 font-semibold text-on-surface">{cliente.nombre_cliente}</td>
                     <td className="px-5 py-4 text-on-surface-variant">{cliente.telefono || '—'}</td>
                     <td className="px-5 py-4 text-on-surface-variant">{cliente.correo || '—'}</td>
+                    <td className="px-5 py-4 text-on-surface-variant">{formatBirthDate(cliente.fecha_nacimiento)}</td>
                     <td className="px-5 py-4 text-right tabular-nums">{Number(cliente.cantidad_compras || 0)}</td>
                     <td className="px-5 py-4 text-right font-medium tabular-nums">{formatCordobas(cliente.total_compras || 0)}</td>
                     <td className="px-5 py-4 text-right"><button type="button" onClick={() => startEdit(cliente)} className="rounded-lg px-3 py-2 text-xs font-semibold text-primary hover:bg-primary-fixed/50">Editar</button></td>
@@ -176,6 +182,9 @@ export default function ClientesPage() {
             </label>
             <label className="block text-sm font-medium text-on-surface">Correo
               <input type="email" maxLength={255} value={form.correo} onChange={(event) => setForm({ ...form, correo: event.target.value })} placeholder="cliente@ejemplo.com" className="mt-1 h-11 w-full rounded-xl border border-outline-variant/50 px-3 font-normal outline-none focus:border-primary" />
+            </label>
+            <label className="block text-sm font-medium text-on-surface">Fecha de nacimiento
+              <input type="date" max={new Date().toLocaleDateString('en-CA')} value={form.fecha_nacimiento} onChange={(event) => setForm({ ...form, fecha_nacimiento: event.target.value })} className="mt-1 h-11 w-full rounded-xl border border-outline-variant/50 px-3 font-normal outline-none focus:border-primary" />
             </label>
             <div className="flex justify-end gap-2 border-t border-surface-container-low pt-4">
               <button type="button" disabled={saving} onClick={() => { setFormOpen(false); setEditing(false); setForm(blankForm); }} className="rounded-xl px-4 py-2 text-sm text-on-surface-variant hover:bg-surface-container-low">Cancelar</button>

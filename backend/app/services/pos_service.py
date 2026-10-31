@@ -13,7 +13,7 @@ from app.services.inventario_service import InventarioService
 
 
 CENT = Decimal("0.01")
-CARD_COMMISSION_RATE = Decimal("0.05")
+DEFAULT_CARD_COMMISSION_PERCENT = Decimal("6.75")
 
 
 class POSService:
@@ -64,14 +64,15 @@ class POSService:
         summary = db.execute(text(f"""
             SELECT count(*) AS transacciones,
                    COALESCE(sum(v.total), 0) AS total_cobrado,
-                   COALESCE(sum(v.total - v.comision_pos), 0) AS ventas_productos,
+                   COALESCE(sum((SELECT COALESCE(sum(vd.subtotal), 0) FROM venta_detalles vd WHERE vd.venta_id = v.id)), 0) AS ventas_productos,
                    COALESCE(sum(v.comision_pos), 0) AS comision_pos
             {from_sql} WHERE {where}
         """), params).mappings().one()
         sales = db.execute(text(f"""
             SELECT v.id, v.fecha_venta, COALESCE(c.nombre_cliente, 'Consumidor Final') AS cliente,
                    COALESCE(mp.metodo_pago, 'Sin método') AS metodo_pago,
-                   v.total, v.comision_pos, v.total - v.comision_pos AS subtotal
+                   v.total, v.comision_pos,
+                   (SELECT COALESCE(sum(vd.subtotal), 0) FROM venta_detalles vd WHERE vd.venta_id = v.id) AS subtotal
             {from_sql} WHERE {where}
             ORDER BY v.fecha_venta DESC, v.id DESC
             LIMIT :limit OFFSET :offset
@@ -108,6 +109,20 @@ class POSService:
                 "items": items_by_sale[row["id"]],
             } for row in sales],
         }
+
+    @staticmethod
+    def get_commission_config(db: Session) -> dict:
+        value = db.execute(text("SELECT comision_tarjeta_porcentaje FROM pos_config WHERE id = 1")).scalar_one()
+        return {"comision_tarjeta_porcentaje": value}
+
+    @staticmethod
+    def save_commission_config(db: Session, rate: Decimal) -> dict:
+        value = db.execute(text("""
+            UPDATE pos_config SET comision_tarjeta_porcentaje = :rate, actualizado_en = now()
+            WHERE id = 1 RETURNING comision_tarjeta_porcentaje
+        """), {"rate": rate}).scalar_one()
+        db.commit()
+        return {"comision_tarjeta_porcentaje": value}
 
     @staticmethod
     def create_sale(db: Session, sale_in: VentaCreate, user_id: int) -> dict:
@@ -167,12 +182,14 @@ class POSService:
                 raise ValueError("El método de pago seleccionado no está configurado")
 
             subtotal = total
+            rate_percent = db.execute(text("SELECT comision_tarjeta_porcentaje FROM pos_config WHERE id = 1")).scalar_one()
             commission = (
-                (subtotal * CARD_COMMISSION_RATE).quantize(CENT, rounding=ROUND_HALF_UP)
+                (subtotal * Decimal(str(rate_percent)) / Decimal("100")).quantize(CENT, rounding=ROUND_HALF_UP)
                 if payment.metodo_pago.strip().casefold() == "tarjeta"
                 else Decimal("0.00")
             )
-            total = subtotal + commission
+            # ponytail: la marca absorbe la comisión; el cliente solo paga el subtotal de productos.
+            total = subtotal
 
             if sale_in.cliente_id:
                 customer = db.execute(

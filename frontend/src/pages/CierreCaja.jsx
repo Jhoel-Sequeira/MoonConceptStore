@@ -106,7 +106,7 @@ export default function CierreCajaPage() {
           <section className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
             <div className="p-5 border-b border-surface-container-low">
               <h2 className="font-bold text-on-surface">Arqueo por método de pago</h2>
-              <p className="text-sm text-on-surface-variant">El efectivo esperado suma el fondo inicial y las ventas en efectivo. La tarjeta incluye el cargo POS cobrado al cliente.</p>
+              <p className="text-sm text-on-surface-variant">El efectivo esperado suma el fondo inicial y las ventas en efectivo. Las ventas con tarjeta se registran por el precio de los artículos.</p>
               {!isClosed && <div className="mt-4 max-w-xs"><label htmlFor="fondo" className="block text-sm font-semibold mb-1">Fondo inicial de caja (C$)</label><input id="fondo" required min="0" type="number" step="0.01" value={fondo} onChange={(e) => setFondo(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-outline-variant" /></div>}
             </div>
             <div className="overflow-x-auto">

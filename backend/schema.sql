@@ -10,6 +10,7 @@ CREATE TABLE [dbo].[clientes](
 	[nombre_cliente] [varchar](255) NOT NULL,
 	[telefono] [varchar](50) NULL,
 	[correo] [varchar](255) NULL,
+	[fecha_nacimiento] [date] NULL,
 PRIMARY KEY CLUSTERED 
 (
 	[id] ASC

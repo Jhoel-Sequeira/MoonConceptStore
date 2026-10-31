@@ -7,7 +7,6 @@ import io
 import logging
 import os
 import posixpath
-from urllib.parse import urlparse
 import zipfile
 import xml.etree.ElementTree as ET
 import openpyxl
@@ -24,10 +23,10 @@ from app.schemas.marcas import MarcaCreate, MarcaUpdate
 from app.core.storage import delete_image, download_image, upload_image
 from app.core.categories import CATEGORY_FIELDS, normalize_category, validate_category_details
 
-DELIVERY_TEMPLATE_VERSION = 6
+DELIVERY_TEMPLATE_VERSION = 7
 DELIVERY_BASE_HEADERS = (
     "#", "SKU / CÓDIGO *", "NOMBRE * SI ES NUEVO", "DESCRIPCIÓN",
-    "PRECIO VENTA C$ * SI ES NUEVO", "CANTIDAD RECIBIDA *", "URL / IMAGEN",
+    "PRECIO VENTA C$ * SI ES NUEVO", "CANTIDAD RECIBIDA *",
 )
 logger = logging.getLogger(__name__)
 
@@ -340,7 +339,7 @@ class MarcasService:
         input_fill = white
         gold_light = "F8F0E4"
         border = Border(*(Side(style="thin", color=line) for _ in range(4)))
-        widths = {"A": 7, "B": 20, "C": 32, "D": 38, "E": 22, "F": 20, "G": 38}
+        widths = {"A": 7, "B": 20, "C": 32, "D": 38, "E": 22, "F": 20}
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
         for col in range(category_start_col, last_col + 1):
@@ -463,7 +462,7 @@ class MarcasService:
             for col in range(1, len(headers) + 1):
                 c = ws.cell(r, col)
                 c.border = border
-                c.alignment = Alignment(vertical="center", wrap_text=col in (3, 4, 7) or col >= category_start_col)
+                c.alignment = Alignment(vertical="center", wrap_text=col in (3, 4) or col >= category_start_col)
                 c.font = Font(name="Segoe UI", size=9, color=muted if col == 1 else ink)
                 c.fill = PatternFill("solid", fgColor=(input_fill if col >= 2 else (white if idx % 2 else zebra)))
             ws.cell(r, 5).number_format = '"C$"#,##0.00'
@@ -516,7 +515,6 @@ class MarcasService:
             ("Descripción", "Agrega material, color, contenido del paquete, modelo u otra información que ayude a distinguirlo."),
             ("Precio venta en C$ *", "Obligatorio para productos nuevos. Para un producto existente puedes dejarlo vacío; el precio actual se conserva."),
             ("Cantidad recibida *", "Cantidad física entregada, como entero mayor que cero. En productos existentes se suma al stock actual."),
-            ("URL / imagen", "Opcional. Pega un URL público en la columna o inserta una imagen en cualquier celda de la misma fila. Puedes proporcionar ambos."),
             ("Campos del rubro", ", ".join(label for _, label in category_fields) or "Sin campos específicos"),
             ("Antes de importar", "Completa una fila por SKU y cantidad recibida. No cambies el nombre de las hojas, encabezados ni estructura. Elimina filas de ejemplo vacías si agregaste datos fuera de las filas preparadas."),
             ("Resultado", "El sistema valida todo el archivo antes de guardar. Los SKU existentes de esta marca reciben más stock; los nuevos se crean. Si un SKU pertenece a otra marca o hay datos inválidos, no se aplica la carga."),
@@ -669,15 +667,6 @@ class MarcasService:
                 raise ValueError(f"La cantidad recibida de la fila {row_num} debe ser un entero positivo dentro del rango permitido")
             if price is not None and price > Decimal("9999999999.99"):
                 raise ValueError(f"El precio de la fila {row_num} excede el máximo admitido")
-            image_url = str(values[6]).strip() if values[6] is not None and str(values[6]).strip() else None
-            if image_url and row_num in embedded_by_row and image_url.startswith("#"):
-                image_url = None  # Excel reports #VALUE! for rich-data images when openpyxl reads the cell.
-            if image_url and len(image_url) > 2000:
-                raise ValueError(f"La URL de imagen de la fila {row_num} es demasiado larga")
-            if image_url:
-                parsed_image_url = urlparse(image_url)
-                if parsed_image_url.scheme not in ("http", "https") or not parsed_image_url.netloc:
-                    raise ValueError(f"La URL de imagen de la fila {row_num} debe comenzar con http:// o https://")
             details = validate_category_details(category, {
                 field: str(values[len(DELIVERY_BASE_HEADERS) + index]).strip()
                 for index, (field, _) in enumerate(category_fields)
@@ -694,7 +683,7 @@ class MarcasService:
                 "tamano": size_value,
                 "precio": price,
                 "stock_inicial": int(quantity_decimal),
-                "imagen_url": image_url,
+                "imagen_url": None,
                 "imagen_incrustada": row_num in embedded_by_row,
                 "detalles_rubro": details,
             })
@@ -820,13 +809,21 @@ class MarcasService:
             "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
             "C:/Windows/Fonts/arial.ttf",
         )
+        bold_font_paths = (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+            "C:/Windows/Fonts/arialbd.ttf",
+        )
         try:
             font_path = next(path for path in font_paths if os.path.exists(path))
+            bold_font_path = next(path for path in bold_font_paths if os.path.exists(path))
             title_font = ImageFont.truetype(font_path, 28)
             detail_font = ImageFont.truetype(font_path, 22)
+            price_font = ImageFont.truetype(bold_font_path, 24)
             ascii_fallback = False
         except (OSError, StopIteration):
             title_font = detail_font = ImageFont.load_default()
+            price_font = ImageFont.load_default()
             ascii_fallback = True
 
         pages = []
@@ -838,7 +835,7 @@ class MarcasService:
                 column, row = index % columns, index // columns
                 left, top = column * cell_width, row * cell_height
                 qr = qrcode.make(producto.codigo_qr or f"BHPOS-{producto.sku}").convert("RGB")
-                qr.thumbnail((300, 300))
+                qr.thumbnail((280, 280))
                 qr_left = left + (cell_width - qr.width) // 2
                 page.paste(qr, (qr_left, top + 20))
                 center_x = left + cell_width // 2
@@ -848,8 +845,9 @@ class MarcasService:
                     import unicodedata
                     name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
                     sku = unicodedata.normalize("NFKD", sku).encode("ascii", "ignore").decode("ascii")
-                draw.text((center_x, top + 335), name, fill="black", font=title_font, anchor="mt")
-                draw.text((center_x, top + 380), sku, fill="black", font=detail_font, anchor="mt")
+                draw.text((center_x, top + 315), name, fill="black", font=title_font, anchor="mt")
+                draw.text((center_x, top + 355), sku, fill="black", font=detail_font, anchor="mt")
+                draw.text((center_x, top + 390), f"C$ {producto.precio:,.2f}", fill="black", font=price_font, anchor="mt")
                 draw.rectangle((left + 12, top + 12, left + cell_width - 12, top + cell_height - 12), outline="#cccccc", width=2)
             pages.append(page)
 

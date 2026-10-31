@@ -237,7 +237,7 @@ def delete_product_photo(
 @router.get("/{producto_id}/qr-image")
 def get_qr_image(producto_id: int, db: Session = Depends(get_db)):
     """Generar imagen PNG del código QR de un producto"""
-    producto = db.query(Producto.id, Producto.sku, Producto.codigo_qr).filter(Producto.id == producto_id).first()
+    producto = db.query(Producto.id, Producto.sku, Producto.codigo_qr, Producto.precio).filter(Producto.id == producto_id).first()
     if not producto:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -245,20 +245,20 @@ def get_qr_image(producto_id: int, db: Session = Depends(get_db)):
         )
     
     qr_data = producto.codigo_qr or f"BHPOS-{producto.sku}"
-    qr_buf = InventarioService.generate_qr_image(qr_data)
+    qr_buf = InventarioService.generate_qr_image(qr_data, producto.precio)
     return Response(content=qr_buf.getvalue(), media_type="image/png")
 
 @router.post("/{producto_id}/generar-qr")
 def regenerate_and_save_qr(producto_id: int, db: Session = Depends(get_db)):
     """Generar el código QR y guardarlo físicamente en el servidor (uploads/qr/)"""
-    producto = db.query(Producto.id, Producto.sku, Producto.codigo_qr).filter(Producto.id == producto_id).first()
+    producto = db.query(Producto.id, Producto.sku, Producto.codigo_qr, Producto.precio).filter(Producto.id == producto_id).first()
     if not producto:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Producto con ID {producto_id} no encontrado"
         )
     
-    qr_image = InventarioService.generate_qr_image(producto.codigo_qr or f"BHPOS-{producto.sku}")
+    qr_image = InventarioService.generate_qr_image(producto.codigo_qr or f"BHPOS-{producto.sku}", producto.precio)
     qr_rel_path = upload_image(
         f"moonconcept/qr/{producto.id}", "codigo.png", qr_image.getvalue(), "image/png"
     )

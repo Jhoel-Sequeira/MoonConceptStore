@@ -9,6 +9,7 @@ CREATE TABLE public.clientes (
   nombre_cliente character varying(255) NOT NULL,
   telefono character varying(50),
   correo character varying(255),
+  fecha_nacimiento date,
   CONSTRAINT clientes_pkey PRIMARY KEY (id)
 );
 
@@ -373,6 +374,16 @@ CREATE TABLE public.ventas_excel (
   CONSTRAINT ventas_excel_pkey PRIMARY KEY (id)
 );
 
+CREATE TABLE public.pos_config (
+  id smallint DEFAULT 1 NOT NULL,
+  comision_tarjeta_porcentaje numeric(5,2) DEFAULT 6.75 NOT NULL,
+  actualizado_en timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT pos_config_pkey PRIMARY KEY (id),
+  CONSTRAINT pos_config_singleton_check CHECK (id = 1),
+  CONSTRAINT pos_config_rate_check CHECK (comision_tarjeta_porcentaje >= 0 AND comision_tarjeta_porcentaje <= 100)
+);
+INSERT INTO public.pos_config (id, comision_tarjeta_porcentaje) VALUES (1, 6.75);
+
 ALTER TABLE public.compra_detalles ADD CONSTRAINT compra_detalles_compra_id_fkey FOREIGN KEY (compra_id) REFERENCES compras(id) ON DELETE CASCADE;
 
 ALTER TABLE public.compra_detalles ADD CONSTRAINT compra_detalles_producto_id_fkey FOREIGN KEY (producto_id) REFERENCES productos(id);
@@ -512,6 +523,8 @@ ALTER TABLE public.marcas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.metodo_pago ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE public.pagos_venta ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.pos_config ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE public.pedidos_excel ENABLE ROW LEVEL SECURITY;
 

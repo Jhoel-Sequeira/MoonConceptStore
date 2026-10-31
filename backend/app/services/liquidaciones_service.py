@@ -55,7 +55,7 @@ class LiquidacionesService:
         first, last = _period(period)
         start, end = utc_naive_bounds(first, last + timedelta(days=1))
         product_rows = db.execute(text("""
-            SELECT v.id AS venta_id, v.fecha_venta, v.comision_pos,
+            SELECT v.id AS venta_id, v.fecha_venta, v.total, v.comision_pos,
                    vd.producto_id, vd.cantidad, vd.subtotal, p.nombre, p.sku,
                    p.marca_id, m.nombre_marca, mp.metodo_pago
             FROM ventas v
@@ -84,7 +84,7 @@ class LiquidacionesService:
         for row in product_rows:
             sale_id = row["venta_id"]
             line_amount = _decimal(row["subtotal"])
-            sale = sales.setdefault(sale_id, {"subtotal": Decimal("0"), "fee": _decimal(row["comision_pos"])})
+            sale = sales.setdefault(sale_id, {"subtotal": Decimal("0"), "total": _decimal(row["total"]), "fee": _decimal(row["comision_pos"])})
             sale["subtotal"] += line_amount
             sale_lines.setdefault(sale_id, []).append((row["marca_id"], row["producto_id"], line_amount))
             brand = brand_map.setdefault(row["marca_id"], {
@@ -116,6 +116,8 @@ class LiquidacionesService:
 
         for sale_id, lines in sale_lines.items():
             sale = sales[sale_id]
+            if sale["total"] > sale["subtotal"]:
+                sale["fee"] = Decimal("0")  # Las ventas antiguas ya cobraron la comisión al cliente.
             allocations = _allocate(sale["fee"], [line[2] for line in lines])
             for (brand_id, product_id, _), fee_share in zip(lines, allocations):
                 brand_map[brand_id]["comision_pos"] += fee_share
@@ -127,7 +129,7 @@ class LiquidacionesService:
             commission = (brand["ventas_brutas"] * STORE_RATE).quantize(CENT, rounding=ROUND_HALF_UP)
             brands.append({
                 **brand, "comision_tienda": commission,
-                "neto_pagar": brand["ventas_brutas"] - commission,
+                "neto_pagar": brand["ventas_brutas"] - commission - brand["comision_pos"],
             })
         gross = sum((row["ventas_brutas"] for row in brands), Decimal("0"))
         store_commission = sum((row["comision_tienda"] for row in brands), Decimal("0"))
@@ -140,13 +142,13 @@ class LiquidacionesService:
             store_allocations = _allocate(brand["comision_tienda"], [item["bruto"] for item in product_rows_for_brand])
             for item, store_fee in zip(product_rows_for_brand, store_allocations):
                 item["comision_tienda"] = store_fee
-                item["neto_marca"] = item["bruto"] - store_fee
+                item["neto_marca"] = item["bruto"] - store_fee - item["comision_pos"]
         result = {
             "periodo": period,
             "resumen": {
                 "ventas_brutas": gross,
                 "comision_tienda": store_commission,
-                "neto_marcas": gross - store_commission,
+                "neto_marcas": gross - store_commission - pos_fee,
                 "comision_pos": pos_fee,
                 "cobrado_efectivo": collected.get("efectivo", Decimal("0")),
                 "cobrado_tarjeta": collected.get("tarjeta", Decimal("0")),
@@ -293,7 +295,7 @@ class LiquidacionesService:
 
         ws.merge_cells("A9:K9")
         payment_status = settlement["estado"] if settlement else "Sin liquidación generada"
-        ws["A9"] = f"ESTADO: {payment_status} · Comisión POS informada por separado: C$ {brand['comision_pos']:,.2f}; no reduce el neto de la marca."
+        ws["A9"] = f"ESTADO: {payment_status} · Comisión POS a cargo de la marca: C$ {brand['comision_pos']:,.2f}; deducida del neto a pagar."
         ws["A9"].font = Font(name="Segoe UI", size=9, bold=True, color=ink)
         ws["A9"].fill = PatternFill("solid", fgColor=blush)
         ws["A9"].alignment = Alignment(vertical="center", wrap_text=True)
@@ -403,7 +405,7 @@ class LiquidacionesService:
                     continue
                 detail_items = db.execute(text("""
                     SELECT p.marca_id, vd.producto_id, vd.cantidad, vd.subtotal,
-                           mp.metodo_pago, v.id AS venta_id, v.comision_pos
+                           mp.metodo_pago, v.id AS venta_id, v.comision_pos, v.total
                     FROM ventas v JOIN estados e ON e.id = v.estado_id AND e.modulo = 'ventas' AND e.nombre = 'Facturada'
                     JOIN venta_detalles vd ON vd.venta_id = v.id JOIN productos p ON p.id = vd.producto_id
                     JOIN pagos_venta pv ON pv.venta_id = v.id JOIN metodo_pago mp ON lower(mp.metodo_pago) = lower(pv.metodo_pago)
@@ -425,18 +427,20 @@ class LiquidacionesService:
                     method = str(item["metodo_pago"]).strip().lower()
                     key = "card" if method == "tarjeta" else "transfer" if method == "transferencia" else "cash"
                     detail[key] += amount
-                    detail_sales.setdefault(item["venta_id"], []).append((pid, amount, _decimal(item["comision_pos"])))
+                    detail_sales.setdefault(item["venta_id"], []).append((pid, amount, _decimal(item["comision_pos"]), _decimal(item["total"])))
                 for sale_lines in detail_sales.values():
                     fee = sale_lines[0][2]
+                    if sale_lines[0][3] > sum((line[1] for line in sale_lines), Decimal("0")):
+                        fee = Decimal("0")  # Las ventas antiguas ya cobraron la comisión al cliente.
                     allocations = _allocate(fee, [line[1] for line in sale_lines])
-                    for (pid, _, _), allocated_fee in zip(sale_lines, allocations):
+                    for (pid, _, _, _), allocated_fee in zip(sale_lines, allocations):
                         detail_groups[pid]["pos_fee"] += allocated_fee
                 product_ids = sorted(detail_groups)
                 store_allocations = _allocate(brand["comision_tienda"], [detail_groups[pid]["gross"] for pid in product_ids])
                 for pid, store_fee in zip(product_ids, store_allocations):
                     detail_groups[pid]["store_fee"] = store_fee
                 for detail in detail_groups.values():
-                    detail["net"] = detail["gross"] - detail["store_fee"]
+                    detail["net"] = detail["gross"] - detail["store_fee"] - detail["pos_fee"]
                     db.execute(text("""
                         INSERT INTO liquidacion_detalles
                         (liquidacion_id, producto_id, cantidad_vendida, monto_efectivo, monto_tarjeta,

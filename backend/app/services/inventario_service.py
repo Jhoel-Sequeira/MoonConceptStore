@@ -3,8 +3,10 @@ from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 import io
+import os
 import re
 import qrcode
+from PIL import Image, ImageDraw, ImageFont
 from app.models.inventario import Producto, Kardex
 from app.models.marcas import Marca
 from app.schemas.inventario import ProductoCreate, ProductoUpdate, ProductoResponse, InventarioStats
@@ -278,7 +280,7 @@ class InventarioService:
         return True
 
     @staticmethod
-    def generate_qr_image(data_text: str) -> io.BytesIO:
+    def generate_qr_image(data_text: str, price=None) -> io.BytesIO:
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_M,
@@ -287,7 +289,21 @@ class InventarioService:
         )
         qr.add_data(data_text)
         qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
+        img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+        if price is not None:
+            font_paths = ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "C:/Windows/Fonts/arialbd.ttf")
+            try:
+                font = ImageFont.truetype(next(path for path in font_paths if os.path.exists(path)), 28)
+            except (OSError, StopIteration):
+                font = ImageFont.load_default()
+            label = f"C$ {price:,.2f}"
+            draw = ImageDraw.Draw(img)
+            bounds = draw.textbbox((0, 0), label, font=font)
+            label_height = bounds[3] - bounds[1]
+            canvas = Image.new("RGB", (img.width, img.height + label_height + 24), "white")
+            canvas.paste(img, (0, 0))
+            ImageDraw.Draw(canvas).text(((img.width - (bounds[2] - bounds[0])) // 2, img.height + 8), label, fill="black", font=font)
+            img = canvas
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)

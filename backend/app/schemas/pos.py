@@ -34,3 +34,7 @@ class VentaResponse(BaseModel):
     comision_pos: Decimal
     total: Decimal
     items: List[VentaDetalleResponse]
+
+
+class POSCommissionConfig(BaseModel):
+    comision_tarjeta_porcentaje: Decimal = Field(ge=0, le=100, max_digits=5, decimal_places=2)

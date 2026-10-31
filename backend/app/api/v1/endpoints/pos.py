@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.usuarios import Usuario
-from app.schemas.pos import VentaCreate, VentaResponse
+from app.schemas.pos import POSCommissionConfig, VentaCreate, VentaResponse
 from app.services.pos_service import POSService
 
 
@@ -16,6 +16,16 @@ router = APIRouter()
 @router.get("/")
 def get_pos():
     return {"status": "ok", "modulo": "Punto de Venta"}
+
+
+@router.get("/configuracion-comision")
+def get_commission_config(db: Session = Depends(get_db)):
+    return POSService.get_commission_config(db)
+
+
+@router.put("/configuracion-comision", response_model=POSCommissionConfig)
+def save_commission_config(payload: POSCommissionConfig, db: Session = Depends(get_db)):
+    return POSService.save_commission_config(db, payload.comision_tarjeta_porcentaje)
 
 
 @router.get("/ventas/historial")
