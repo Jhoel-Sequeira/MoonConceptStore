@@ -189,6 +189,26 @@ class LiquidacionesService:
             raise HTTPException(status_code=404, detail="La marca no tiene ventas en ese período.")
         products = [item for item in report["por_producto"] if item["marca_id"] == brand_id]
         settlement = next((item for item in LiquidacionesService.list_for_period(db, period) if item["marca_id"] == brand_id), None)
+        first, last = _period(period)
+        start, end = utc_naive_bounds(first, last + timedelta(days=1))
+        sales = db.execute(text("""
+            SELECT v.id AS venta_id, v.fecha_venta, v.total AS total_venta,
+                   COALESCE(c.nombre_cliente, 'Consumidor Final') AS cliente,
+                   p.nombre AS producto, p.sku, vd.cantidad, vd.precio_unitario,
+                   vd.descuento, vd.subtotal,
+                   COALESCE(pagos.metodos_pago, '—') AS metodos_pago
+            FROM ventas v
+            JOIN estados e ON e.id = v.estado_id AND e.modulo = 'ventas' AND e.nombre = 'Facturada'
+            JOIN venta_detalles vd ON vd.venta_id = v.id
+            JOIN productos p ON p.id = vd.producto_id
+            LEFT JOIN clientes c ON c.id = v.cliente_id
+            LEFT JOIN LATERAL (
+                SELECT string_agg(pv.metodo_pago || ': C$ ' || to_char(pv.monto, 'FM9999999990.00'), ' | ' ORDER BY pv.id) AS metodos_pago
+                FROM pagos_venta pv WHERE pv.venta_id = v.id
+            ) pagos ON true
+            WHERE p.marca_id = :brand_id AND v.fecha_venta >= :start AND v.fecha_venta < :end
+            ORDER BY v.fecha_venta, v.id, vd.id
+        """), {"brand_id": brand_id, "start": start, "end": end}).mappings().all()
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -352,6 +372,42 @@ class LiquidacionesService:
         ws.print_area = f"A1:K{total_row}"
         ws.oddFooter.center.text = "Moon Concept Store · Liquidación mensual"
         ws.oddFooter.right.text = "Página &[Page] de &[Pages]"
+
+        sales_ws = wb.create_sheet("Ventas_Detalladas")
+        sales_ws.sheet_view.showGridLines = False
+        sales_ws.freeze_panes = "A2"
+        sales_headers = ["Venta #", "Fecha y hora", "Cliente", "Método(s) y monto(s) de pago", "SKU", "Producto", "Unidades", "Precio unitario", "Descuento", "Subtotal de línea", "Total de la venta"]
+        sales_widths = [12, 21, 30, 38, 18, 34, 12, 18, 16, 20, 20]
+        for column, (label, width) in enumerate(zip(sales_headers, sales_widths), start=1):
+            cell = sales_ws.cell(1, column, label)
+            cell.font = Font(name="Segoe UI", size=9, bold=True, color=ink)
+            cell.fill = PatternFill("solid", fgColor=gold_light)
+            cell.border = border
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            sales_ws.column_dimensions[get_column_letter(column)].width = width
+        sales_ws.row_dimensions[1].height = 34
+        for row_index, sale_line in enumerate(sales, start=2):
+            sale_date = sale_line["fecha_venta"].replace(tzinfo=timezone.utc).astimezone(MANAGUA)
+            values = [sale_line["venta_id"], sale_date, sale_line["cliente"], sale_line["metodos_pago"],
+                      sale_line["sku"] or "—", sale_line["producto"], sale_line["cantidad"],
+                      sale_line["precio_unitario"], sale_line["descuento"], sale_line["subtotal"], sale_line["total_venta"]]
+            for column, value in enumerate(values, start=1):
+                cell = sales_ws.cell(row_index, column, float(value) if isinstance(value, Decimal) else value)
+                cell.font = Font(name="Segoe UI", size=9, color=ink)
+                cell.fill = PatternFill("solid", fgColor=zebra if row_index % 2 == 0 else white)
+                cell.border = border
+                cell.alignment = Alignment(vertical="center", horizontal="right" if column >= 7 else "left", wrap_text=column in (3, 4, 6))
+                if column == 2:
+                    cell.number_format = "dd/mm/yyyy hh:mm"
+                elif column >= 8:
+                    cell.number_format = '"C$"#,##0.00'
+            sales_ws.row_dimensions[row_index].height = 25
+        if sales:
+            sales_ws.auto_filter.ref = f"A1:K{len(sales) + 1}"
+        sales_ws.sheet_properties.pageSetUpPr.fitToPage = True
+        sales_ws.page_setup.fitToWidth = 1
+        sales_ws.page_setup.fitToHeight = 0
+        sales_ws.page_setup.orientation = "landscape"
         wb.properties.creator = "Moon Concept Store"
         output = BytesIO()
         wb.save(output)

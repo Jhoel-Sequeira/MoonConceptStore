@@ -35,6 +35,14 @@ class _BrandResult:
             "nombre_representante": "Representante", "email": "demo@example.com", "telefono": "555-0100", "logo": None,
         }
 
+    def all(self):
+        return [{
+            "venta_id": 17, "fecha_venta": datetime(2026, 9, 12, 18, 0), "total_venta": Decimal("10.00"),
+            "cliente": "Cliente Demo", "producto": "Producto Demo", "sku": "SKU-4", "cantidad": 2,
+            "precio_unitario": Decimal("5.00"), "descuento": Decimal("0.00"), "subtotal": Decimal("10.00"),
+            "metodos_pago": "Efectivo: C$ 10.00",
+        }]
+
 
 class _BrandDb:
     def execute(self, *_args, **_kwargs):
@@ -68,3 +76,6 @@ assert sheet["B2"].value == "LIQUIDACIÓN MENSUAL · DETALLE DE VENTAS"
 assert sheet["A10"].fill.fgColor.rgb.endswith("FFFFFF") and sheet["A10"].font.color.rgb.endswith("493A35")
 assert sheet["E10"].fill.fgColor.rgb.endswith("C9A46D")
 assert sheet["J12"].value == 2.0 and sheet["K12"].value == 8.0
+sales_sheet = load_workbook(BytesIO(workbook_bytes), data_only=True)["Ventas_Detalladas"]
+assert sales_sheet["A2"].value == 17 and sales_sheet["C2"].value == "Cliente Demo"
+assert sales_sheet["F2"].value == "Producto Demo" and sales_sheet["J2"].value == 10.0

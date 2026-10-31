@@ -761,8 +761,8 @@ export default function CatalogoQRPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
               {/* Columna Izquierda: QR y Acciones */}
-              <div className="flex flex-col items-center justify-center p-4 bg-surface-container-low/60 rounded-xl border border-surface-container gap-3">
-                <div className="w-48 h-48 bg-white p-3 rounded-xl shadow-md flex items-center justify-center border border-slate-200">
+              <div className="flex flex-col items-center justify-center p-4 bg-white rounded-xl border border-slate-200 gap-3">
+                <div className="w-64 h-64 bg-white p-2 rounded-xl shadow-md flex items-center justify-center border border-slate-200">
                   <img
                     src={inventarioService.getQrImageUrl(detailProduct.id, detailProduct.sku, detailProduct.qr_image_url)}
                     alt={`Código QR ${detailProduct.sku}`}

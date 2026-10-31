@@ -328,13 +328,13 @@ class InventarioService:
         detail_font, detail_fallback = load_label_font(regular_paths, 30)
         price_font, price_fallback = load_label_font(bold_paths, 44)
 
-        width, height = 900, 690
-        card = Image.new("RGB", (width, height), "#f6f6f6")
+        width, height = 900, 720
+        card = Image.new("RGB", (width, height), "white")
         draw = ImageDraw.Draw(card)
         draw.rounded_rectangle((48, 30, width - 48, height - 30), radius=28, fill="white", outline="#d2d2d2", width=4)
-        qr_image.thumbnail((320, 320))
+        qr_image.thumbnail((370, 370))
         center_x = width // 2
-        card.paste(qr_image, ((width - qr_image.width) // 2, 78))
+        card.paste(qr_image, ((width - qr_image.width) // 2, 58))
 
         title = name or "Producto"
         title_size = 54
@@ -346,11 +346,11 @@ class InventarioService:
         while detail_size > 24 and draw.textbbox((0, 0), sku_label, font=detail_font)[2] > 760:
             detail_size -= 2
             detail_font, detail_fallback = load_label_font(regular_paths, detail_size)
-        draw.text((center_x, 430), title, fill="#111111", font=title_font, anchor="mt", stroke_width=1 if title_fallback else 0, stroke_fill="#111111")
-        draw.line((315, 490, 585, 490), fill="#d2d2d2", width=3)
-        draw.text((center_x, 506), sku_label, fill="#555555", font=detail_font, anchor="mt")
-        draw.line((315, 560, 585, 560), fill="#d2d2d2", width=3)
-        draw.text((center_x, 578), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt", stroke_width=1 if price_fallback else 0, stroke_fill="#111111")
+        draw.text((center_x, 440), title, fill="#111111", font=title_font, anchor="mt", stroke_width=1 if title_fallback else 0, stroke_fill="#111111")
+        draw.line((315, 505, 585, 505), fill="#d2d2d2", width=3)
+        draw.text((center_x, 521), sku_label, fill="#555555", font=detail_font, anchor="mt")
+        draw.line((315, 575, 585, 575), fill="#d2d2d2", width=3)
+        draw.text((center_x, 593), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt", stroke_width=1 if price_fallback else 0, stroke_fill="#111111")
         img = card
         buf = io.BytesIO()
         img.save(buf, format="PNG")
