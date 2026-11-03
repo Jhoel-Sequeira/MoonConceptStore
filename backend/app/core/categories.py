@@ -66,7 +66,8 @@ def validate_category_details(category: str, details: dict[str, str] | None) -> 
     fields = {key for key, _ in CATEGORY_FIELDS.get(category, ())}
     values = details or {}
     # ponytail: accept legacy size keys; templates map rubric-specific talla/tamano fields into Producto.tamano.
-    invalid = set(values) - fields - {"talla", "tamano"}
+    legacy_pet_color = {"color"} if category == "Accesorios para mascotas" else set()
+    invalid = set(values) - fields - {"talla", "tamano"} - legacy_pet_color
     if invalid:
         raise ValueError(f"Campos no válidos para el rubro {category}: {', '.join(sorted(invalid))}")
     cleaned = {}

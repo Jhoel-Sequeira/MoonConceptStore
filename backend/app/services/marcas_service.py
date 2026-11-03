@@ -676,13 +676,10 @@ class MarcasService:
             return amount
 
         for row_num, values in enumerate(ws.iter_rows(min_row=data_start, max_row=data_end, min_col=1, max_col=(7 if legacy_pet_template else len(DELIVERY_BASE_HEADERS) + len(category_fields)), values_only=True), start=data_start):
+            legacy_color = None
             if legacy_pet_template:
-                # ponytail: keep color in description because this rubric has no color detail field.
-                color = str(values[6]).strip() if values[6] is not None and str(values[6]).strip() else ""
-                description = str(values[2]).strip() if values[2] is not None and str(values[2]).strip() else ""
-                if color:
-                    description = f"{description} · Color: {color}" if description else f"Color: {color}"
-                values = (values[0], values[1], values[2], description, values[3], values[4], None, None, values[5], None)
+                legacy_color = str(values[6]).strip() if values[6] is not None and str(values[6]).strip() else None
+                values = (values[0], values[1], values[2], None, values[3], values[4], None, None, values[5], None)
             # Ignorar solo filas completamente vacías en las columnas editables.
             editable = values[1:]
             if all(value is None or str(value).strip() == "" for value in editable) and row_num not in embedded_by_row:
@@ -710,6 +707,8 @@ class MarcasService:
                 for index, (field, _) in enumerate(category_fields)
                 if values[len(DELIVERY_BASE_HEADERS) + index] is not None and str(values[len(DELIVERY_BASE_HEADERS) + index]).strip()
             })
+            if legacy_color:
+                details["color"] = legacy_color
             size_value = details.pop("talla", None)
             if size_value is None:
                 size_value = details.pop("tamano", None)
