@@ -595,7 +595,17 @@ class MarcasService:
         category = normalize_category(marca.categoria)
         category_fields = CATEGORY_FIELDS.get(category, ())
         category_start_col = len(DELIVERY_BASE_HEADERS) + 1
-        if meta["B6"].value != category or [ws.cell(10, col).value for col in range(category_start_col, category_start_col + len(category_fields))] != [label.upper() for _, label in category_fields]:
+        category_headers = [ws.cell(10, col).value for col in range(category_start_col, category_start_col + len(category_fields))]
+        legacy_headers = [str(ws.cell(10, col).value or "").upper() for col in range(1, 8)]
+        legacy_pet_template = (
+            category == "Accesorios para mascotas"
+            and legacy_headers[0] == "#"
+            and legacy_headers[1].startswith("SKU / C")
+            and legacy_headers[2].startswith("DESCRIPCI")
+            and legacy_headers[3].startswith("PRECIO VENTA C$")
+            and legacy_headers[4:] == ["CANTIDAD", "TALLA", "COLOR"]
+        )
+        if meta["B6"].value != category or (not legacy_pet_template and category_headers != [label.upper() for _, label in category_fields]):
             raise ValueError("El rubro de la marca cambió. Descarga una plantilla nueva.")
         rows, seen_skus = [], set()
         embedded_by_row = {}
@@ -665,7 +675,14 @@ class MarcasService:
                 raise ValueError(f"{label} debe ser {'mayor que cero' if not allow_zero else 'cero o mayor'} (fila {row_num})")
             return amount
 
-        for row_num, values in enumerate(ws.iter_rows(min_row=data_start, max_row=data_end, min_col=1, max_col=len(DELIVERY_BASE_HEADERS) + len(category_fields), values_only=True), start=data_start):
+        for row_num, values in enumerate(ws.iter_rows(min_row=data_start, max_row=data_end, min_col=1, max_col=(7 if legacy_pet_template else len(DELIVERY_BASE_HEADERS) + len(category_fields)), values_only=True), start=data_start):
+            if legacy_pet_template:
+                # ponytail: keep color in description because this rubric has no color detail field.
+                color = str(values[6]).strip() if values[6] is not None and str(values[6]).strip() else ""
+                description = str(values[2]).strip() if values[2] is not None and str(values[2]).strip() else ""
+                if color:
+                    description = f"{description} · Color: {color}" if description else f"Color: {color}"
+                values = (values[0], values[1], values[2], description, values[3], values[4], None, None, values[5], None)
             # Ignorar solo filas completamente vacías en las columnas editables.
             editable = values[1:]
             if all(value is None or str(value).strip() == "" for value in editable) and row_num not in embedded_by_row:
