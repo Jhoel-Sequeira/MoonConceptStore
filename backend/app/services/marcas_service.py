@@ -324,8 +324,13 @@ class MarcasService:
                 return None, None
             category = normalize_category(marca.categoria)
         category_fields = CATEGORY_FIELDS.get(category, ())
-        headers = [*DELIVERY_BASE_HEADERS, *(label.upper() for _, label in category_fields)]
-        category_start_col = len(DELIVERY_BASE_HEADERS) + 1
+        compact_pet_template = category == "Accesorios para mascotas"
+        headers = (
+            ["#", "SKU / CÓDIGO *", "DESCRIPCIÓN EXACTA", "PRECIO VENTA C$", "CANTIDAD", "TALLA", "COLOR"]
+            if compact_pet_template
+            else [*DELIVERY_BASE_HEADERS, *(label.upper() for _, label in category_fields)]
+        )
+        category_start_col = 6 if compact_pet_template else len(DELIVERY_BASE_HEADERS) + 1
         last_col = len(headers)
 
         wb = openpyxl.Workbook()
@@ -448,8 +453,9 @@ class MarcasService:
 
         for col, title in enumerate(headers, start=1):
             c = ws.cell(10, col, title)
-            c.font = Font(name="Segoe UI", size=9, bold=True, color=white if col in (5, 6) else ink)
-            c.fill = PatternFill("solid", fgColor=gold if col in (5, 6) else (pink if col >= category_start_col else rose))
+            highlighted_cols = (4, 5) if compact_pet_template else (5, 6)
+            c.font = Font(name="Segoe UI", size=9, bold=True, color=white if col in highlighted_cols else ink)
+            c.fill = PatternFill("solid", fgColor=gold if col in highlighted_cols else (pink if col >= category_start_col else rose))
             c.border = border
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             c.comment = Comment({
@@ -460,6 +466,12 @@ class MarcasService:
                 6: "Obligatorio. Cantidad física recibida, entero mayor que cero; se suma al stock actual.",
                 7: "Opcional. Pega un URL público o inserta una imagen en esta fila; puedes usar ambos.",
             }.get(col, "Número consecutivo automático; no editar."), "Sistema")
+            if compact_pet_template and col == 3:
+                c.comment = Comment("Nombre o descripción exacta del artículo. Obligatorio para productos nuevos.", "Sistema")
+            if compact_pet_template and col == 4:
+                c.comment = Comment("Precio de venta en córdobas. Obligatorio para productos nuevos.", "Sistema")
+            if compact_pet_template and col == 5:
+                c.comment = Comment("Cantidad física recibida, entero mayor que cero.", "Sistema")
             if col >= category_start_col:
                 c.comment = Comment(f"Campo específico del rubro {category}. Opcional.", "Sistema")
         ws.row_dimensions[10].height = 38
@@ -474,8 +486,8 @@ class MarcasService:
                 c.alignment = Alignment(vertical="center", wrap_text=col in (3, 4) or col >= category_start_col)
                 c.font = Font(name="Segoe UI", size=9, color=muted if col == 1 else ink)
                 c.fill = PatternFill("solid", fgColor=(input_fill if col >= 2 else (white if idx % 2 else zebra)))
-            ws.cell(r, 5).number_format = '"C$"#,##0.00'
-            ws.cell(r, 6).number_format = "0"
+            ws.cell(r, 4 if compact_pet_template else 5).number_format = '"C$"#,##0.00'
+            ws.cell(r, 5 if compact_pet_template else 6).number_format = "0"
 
         ws.conditional_formatting.add(
             f"B{start_row}:B{end_row}",
@@ -498,8 +510,10 @@ class MarcasService:
             ws.add_data_validation(dv)
         dv_text.add(f"B{start_row}:B{end_row}")
         dv_name.add(f"C{start_row}:C{end_row}")
-        dv_price.add(f"E{start_row}:E{end_row}")
-        dv_qty.add(f"F{start_row}:F{end_row}")
+        dv_price_col = "D" if compact_pet_template else "E"
+        dv_qty_col = "E" if compact_pet_template else "F"
+        dv_price.add(f"{dv_price_col}{start_row}:{dv_price_col}{end_row}")
+        dv_qty.add(f"{dv_qty_col}{start_row}:{dv_qty_col}{end_row}")
         ws.sheet_properties.pageSetUpPr.fitToPage = True
         ws.page_setup.fitToWidth = 1
         ws.page_setup.fitToHeight = 0
