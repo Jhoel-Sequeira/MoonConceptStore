@@ -12,3 +12,4 @@
 - Individual QR PNGs and printable PDF labels share a white rounded-card layout with centered QR, product name, SKU, and bold C$ price; preserve the existing QR payload and use scalable font fallbacks when system fonts are missing.
 - Inventory search accepts SKU, name, QR code, and description; keep the global header and inventory page searches wired to that endpoint.
 - Generic inventory template downloads include one Excel per configured rubro in a ZIP. Each is reusable for any brand with the same rubro; preserve the rubro header checks when importing.
+- Generic and brand inventory templates use the compact field layout configured per rubro; imports map those columns into product name, size, and rubro details while retaining compatibility with the prior standard template layout.

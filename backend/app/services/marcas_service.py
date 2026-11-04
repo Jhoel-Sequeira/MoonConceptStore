@@ -8,6 +8,7 @@ import io
 import logging
 import os
 import posixpath
+import unicodedata
 import zipfile
 import xml.etree.ElementTree as ET
 import openpyxl
@@ -31,6 +32,33 @@ DELIVERY_BASE_HEADERS = (
     "PRECIO VENTA C$ * SI ES NUEVO", "CANTIDAD RECIBIDA *",
 )
 logger = logging.getLogger(__name__)
+
+
+def _normalize_template_header(value) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or "").strip())
+    return " ".join("".join(char for char in normalized if not unicodedata.combining(char)).upper().split())
+
+DELIVERY_RUBRIC_LAYOUTS = {
+    "ACCESORIOS": ("DESCRIPCI\u00d3N EXACTA", "CANTIDAD", (("material", "MATERIAL"), ("color", "COLOR"))),
+    "Accesorios para el cabello": ("DESCRIPCI\u00d3N", "CANTIDAD", (("tipo", "TIPO DE ACCESORIO"), ("talla", "TALLA"), ("color", "COLOR"))),
+    "Accesorios para mascotas": ("DESCRIPCI\u00d3N EXACTA", "CANTIDAD", (("talla", "TALLA"), ("color", "COLOR"))),
+    "ACCESORIOS VARIOS": ("DESCRIPCI\u00d3N EXACTA", "CANTIDAD RECIBIDA *", (("tipo", "TIPO DE PRODUCTO"), ("talla", "TALLA"), ("color", "COLOR"))),
+    "Articulos para bebe": ("DESCRIPCI\u00d3N", "CANTIDAD", (("edad", "EDAD RECOMENDADA"), ("talla", "TALLA"), ("color", "COLOR"))),
+    "ARTICULOS PARA DIABETICOS": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("tipo", "TIPO DE ART\u00cdCULO"), ("talla", "TALLA"), ("color", "COLOR"))),
+    "CALZADO DAMA": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("talla", "TALLA"), ("material", "MATERIAL"), ("color", "COLOR"), ("estilo", "ESTILO"))),
+    "Comestibles": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("unidad", "UNIDAD DE MEDIDA"), ("vencimiento", "FECHA DE VENCIMIENTO"))),
+    "JOYERIA": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("material", "MATERIAL"), ("color", "COLOR"))),
+    "Make up y Skincare": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("tipo", "TIPO DE PRODUCTO"), ("tipo_piel", "TIPO DE PIEL"))),
+    "Papeler\u00eda y accesorios": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("uso", "USO"),)),
+    "Perfumeria": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("presentacion", "PRESENTACI\u00d3N"),)),
+    "Ropa/Caballero": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("talla", "TALLA"), ("color", "COLOR"), ("material", "MATERIAL"))),
+    "Ropa/Dama": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("talla", "TALLA"), ("color", "COLOR"), ("material", "MATERIAL"))),
+    "ROPA DE NI\u00d1OS": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("talla", "TALLA"), ("color", "COLOR"))),
+    "Ropa Interior": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("tipo_prenda", "TIPO DE PRENDA"), ("talla", "TALLA"), ("color", "COLOR"))),
+    "ROPA VARIADA": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("tipo_prenda", "TIPO DE PRENDA"), ("talla", "TALLA"), ("color", "COLOR"))),
+    "SKINCARE": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("tipo_piel", "TIPO DE PIEL"), ("unidad", "UNIDAD DE MEDIDA"))),
+    "Tecnologia y Hogar": ("DESCRIPCI\u00d3N", "CANTIDAD RECIBIDA *", (("tipo", "TIPO DE PRODUCTO"), ("color", "COLOR"))),
+}
 
 
 def _extract_in_cell_images(file_bytes: bytes, sheet_name: str, row_start: int, row_end: int) -> dict:
@@ -323,14 +351,16 @@ class MarcasService:
             if not marca:
                 return None, None
             category = normalize_category(marca.categoria)
-        category_fields = CATEGORY_FIELDS.get(category, ())
-        compact_pet_template = category == "Accesorios para mascotas"
-        headers = (
-            ["#", "SKU / CÓDIGO *", "DESCRIPCIÓN EXACTA", "PRECIO VENTA C$", "CANTIDAD", "TALLA", "COLOR"]
-            if compact_pet_template
-            else [*DELIVERY_BASE_HEADERS, *(label.upper() for _, label in category_fields)]
-        )
-        category_start_col = 6 if compact_pet_template else len(DELIVERY_BASE_HEADERS) + 1
+        rubric_layout = DELIVERY_RUBRIC_LAYOUTS.get(category)
+        compact_template = rubric_layout is not None
+        if compact_template:
+            description_header, quantity_header, category_fields = rubric_layout
+            headers = ["#", "SKU / CÓDIGO *", description_header, "PRECIO VENTA C$", quantity_header,
+                       *(label for _, label in category_fields)]
+        else:
+            category_fields = CATEGORY_FIELDS.get(category, ())
+            headers = [*DELIVERY_BASE_HEADERS, *(label.upper() for _, label in category_fields)]
+        category_start_col = 6 if compact_template else len(DELIVERY_BASE_HEADERS) + 1
         last_col = len(headers)
 
         wb = openpyxl.Workbook()
@@ -453,7 +483,7 @@ class MarcasService:
 
         for col, title in enumerate(headers, start=1):
             c = ws.cell(10, col, title)
-            highlighted_cols = (4, 5) if compact_pet_template else (5, 6)
+            highlighted_cols = (4, 5) if compact_template else (5, 6)
             c.font = Font(name="Segoe UI", size=9, bold=True, color=white if col in highlighted_cols else ink)
             c.fill = PatternFill("solid", fgColor=gold if col in highlighted_cols else (pink if col >= category_start_col else rose))
             c.border = border
@@ -466,11 +496,11 @@ class MarcasService:
                 6: "Obligatorio. Cantidad física recibida, entero mayor que cero; se suma al stock actual.",
                 7: "Opcional. Pega un URL público o inserta una imagen en esta fila; puedes usar ambos.",
             }.get(col, "Número consecutivo automático; no editar."), "Sistema")
-            if compact_pet_template and col == 3:
+            if compact_template and col == 3:
                 c.comment = Comment("Nombre o descripción exacta del artículo. Obligatorio para productos nuevos.", "Sistema")
-            if compact_pet_template and col == 4:
+            if compact_template and col == 4:
                 c.comment = Comment("Precio de venta en córdobas. Obligatorio para productos nuevos.", "Sistema")
-            if compact_pet_template and col == 5:
+            if compact_template and col == 5:
                 c.comment = Comment("Cantidad física recibida, entero mayor que cero.", "Sistema")
             if col >= category_start_col:
                 c.comment = Comment(f"Campo específico del rubro {category}. Opcional.", "Sistema")
@@ -486,8 +516,8 @@ class MarcasService:
                 c.alignment = Alignment(vertical="center", wrap_text=col in (3, 4) or col >= category_start_col)
                 c.font = Font(name="Segoe UI", size=9, color=muted if col == 1 else ink)
                 c.fill = PatternFill("solid", fgColor=(input_fill if col >= 2 else (white if idx % 2 else zebra)))
-            ws.cell(r, 4 if compact_pet_template else 5).number_format = '"C$"#,##0.00'
-            ws.cell(r, 5 if compact_pet_template else 6).number_format = "0"
+            ws.cell(r, 4 if compact_template else 5).number_format = '"C$"#,##0.00'
+            ws.cell(r, 5 if compact_template else 6).number_format = "0"
 
         ws.conditional_formatting.add(
             f"B{start_row}:B{end_row}",
@@ -510,8 +540,8 @@ class MarcasService:
             ws.add_data_validation(dv)
         dv_text.add(f"B{start_row}:B{end_row}")
         dv_name.add(f"C{start_row}:C{end_row}")
-        dv_price_col = "D" if compact_pet_template else "E"
-        dv_qty_col = "E" if compact_pet_template else "F"
+        dv_price_col = "D" if compact_template else "E"
+        dv_qty_col = "E" if compact_template else "F"
         dv_price.add(f"{dv_price_col}{start_row}:{dv_price_col}{end_row}")
         dv_qty.add(f"{dv_qty_col}{start_row}:{dv_qty_col}{end_row}")
         ws.sheet_properties.pageSetUpPr.fitToPage = True
@@ -607,19 +637,23 @@ class MarcasService:
         if not isinstance(data_start, int) or not isinstance(data_end, int) or data_start < 11 or data_end < data_start:
             raise ValueError("La plantilla no contiene un rango de productos válido")
         category = normalize_category(marca.categoria)
-        category_fields = CATEGORY_FIELDS.get(category, ())
-        category_start_col = len(DELIVERY_BASE_HEADERS) + 1
-        category_headers = [ws.cell(10, col).value for col in range(category_start_col, category_start_col + len(category_fields))]
-        legacy_headers = [str(ws.cell(10, col).value or "").upper() for col in range(1, 8)]
-        legacy_pet_template = (
-            category == "Accesorios para mascotas"
-            and legacy_headers[0] == "#"
-            and legacy_headers[1].startswith("SKU / C")
-            and legacy_headers[2].startswith("DESCRIPCI")
-            and legacy_headers[3].startswith("PRECIO VENTA C$")
-            and legacy_headers[4:] == ["CANTIDAD", "TALLA", "COLOR"]
-        )
-        if meta["B6"].value != category or (not legacy_pet_template and category_headers != [label.upper() for _, label in category_fields]):
+        canonical_fields = CATEGORY_FIELDS.get(category, ())
+        canonical_headers = [ws.cell(10, col).value for col in range(7, 7 + len(canonical_fields))]
+        rubric_layout = DELIVERY_RUBRIC_LAYOUTS.get(category)
+        compact_template = False
+        if rubric_layout:
+            description_header, quantity_header, compact_fields = rubric_layout
+            compact_expected = ["#", "SKU / CÓDIGO *", description_header, "PRECIO VENTA C$", quantity_header,
+                                *(label for _, label in compact_fields)]
+            compact_actual = [ws.cell(10, col).value for col in range(1, len(compact_expected) + 1)]
+            compact_template = all(
+                _normalize_template_header(actual) == _normalize_template_header(expected)
+                for actual, expected in zip(compact_actual, compact_expected)
+            )
+        category_fields = canonical_fields
+        template_category = _normalize_template_header(meta["B6"].value)
+        expected_category = _normalize_template_header(category)
+        if template_category != expected_category or (not compact_template and canonical_headers != [label.upper() for _, label in canonical_fields]):
             raise ValueError("El rubro de la marca cambió. Descarga una plantilla nueva.")
         rows, seen_skus = [], set()
         embedded_by_row = {}
@@ -689,13 +723,20 @@ class MarcasService:
                 raise ValueError(f"{label} debe ser {'mayor que cero' if not allow_zero else 'cero o mayor'} (fila {row_num})")
             return amount
 
-        for row_num, values in enumerate(ws.iter_rows(min_row=data_start, max_row=data_end, min_col=1, max_col=(7 if legacy_pet_template else len(DELIVERY_BASE_HEADERS) + len(category_fields)), values_only=True), start=data_start):
-            legacy_color = None
-            if legacy_pet_template:
-                legacy_color = str(values[6]).strip() if values[6] is not None and str(values[6]).strip() else None
-                values = (values[0], values[1], values[2], None, values[3], values[4], None, None, values[5], None)
+        compact_fields = rubric_layout[2] if rubric_layout else ()
+        compact_details = None
+        max_product_col = 5 + len(compact_fields) if compact_template else len(DELIVERY_BASE_HEADERS) + len(category_fields)
+        for row_num, values in enumerate(ws.iter_rows(min_row=data_start, max_row=data_end, min_col=1, max_col=max_product_col, values_only=True), start=data_start):
+            compact_details = None
+            if compact_template:
+                compact_details = {
+                    field: str(values[5 + index]).strip()
+                    for index, (field, _) in enumerate(compact_fields)
+                    if values[5 + index] is not None and str(values[5 + index]).strip()
+                }
+                values = (values[0], values[1], values[2], None, values[3], values[4])
             # Ignorar solo filas completamente vacías en las columnas editables.
-            editable = values[1:]
+            editable = (*values[1:], *((compact_details or {}).values()))
             if all(value is None or str(value).strip() == "" for value in editable) and row_num not in embedded_by_row:
                 continue
             sku = str(values[1]).strip().upper() if values[1] is not None else ""
@@ -716,13 +757,11 @@ class MarcasService:
                 raise ValueError(f"La cantidad recibida de la fila {row_num} debe ser un entero positivo dentro del rango permitido")
             if price is not None and price > Decimal("9999999999.99"):
                 raise ValueError(f"El precio de la fila {row_num} excede el máximo admitido")
-            details = validate_category_details(category, {
+            details = validate_category_details(category, compact_details if compact_template else {
                 field: str(values[len(DELIVERY_BASE_HEADERS) + index]).strip()
                 for index, (field, _) in enumerate(category_fields)
                 if values[len(DELIVERY_BASE_HEADERS) + index] is not None and str(values[len(DELIVERY_BASE_HEADERS) + index]).strip()
-            })
-            if legacy_color:
-                details["color"] = legacy_color
+            }, allowed_fields={field for field, _ in compact_fields} if compact_template else None)
             size_value = details.pop("talla", None)
             if size_value is None:
                 size_value = details.pop("tamano", None)
