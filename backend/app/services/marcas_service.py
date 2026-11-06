@@ -891,11 +891,7 @@ class MarcasService:
         # ponytail: rasterizar una hoja carta con Pillow evita a?adir una dependencia PDF.
         page_width, page_height = 1275, 1650  # Carta a 150 DPI
         columns, rows_per_page = 4, 8
-        labels = [
-            product
-            for product, detail in productos_procesados
-            for _ in range(max(1, int((detail.get("stock_inicial", 1) if isinstance(detail, dict) else getattr(detail, "cantidad", 1)) or 1)))
-        ]
+        labels = [product for product, _ in productos_procesados]
         cell_width, cell_height = page_width // columns, page_height // rows_per_page
         pages = []
         for page_start in range(0, len(labels), columns * rows_per_page):
