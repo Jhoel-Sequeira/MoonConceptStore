@@ -287,7 +287,7 @@ class InventarioService:
             box_size=10,
             border=2,
         )
-        qr.add_data(data_text)
+        qr.add_data(data_text.encode("utf-8"), optimize=0)
         qr.make(fit=True)
         qr_image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
         serif_bold_paths = (
