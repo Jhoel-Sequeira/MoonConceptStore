@@ -506,7 +506,7 @@ class MarcasService:
                 c.comment = Comment(f"Campo específico del rubro {category}. Opcional.", "Sistema")
         ws.row_dimensions[10].height = 38
 
-        start_row, end_row = 11, 40
+        start_row, end_row = 11, 510
         for idx, r in enumerate(range(start_row, end_row + 1), start=1):
             ws.row_dimensions[r].height = 24
             ws.cell(r, 1, idx)
@@ -890,13 +890,18 @@ class MarcasService:
     def generate_import_qr_pdf(productos_procesados: list) -> bytes:
         # ponytail: rasterizar una hoja carta con Pillow evita a?adir una dependencia PDF.
         page_width, page_height = 1275, 1650  # Carta a 150 DPI
-        columns, rows_per_page = 2, 4
+        columns, rows_per_page = 4, 8
+        labels = [
+            product
+            for product, detail in productos_procesados
+            for _ in range(max(1, int((detail.get("stock_inicial", 1) if isinstance(detail, dict) else getattr(detail, "cantidad", 1)) or 1)))
+        ]
         cell_width, cell_height = page_width // columns, page_height // rows_per_page
         pages = []
-        for page_start in range(0, len(productos_procesados), columns * rows_per_page):
+        for page_start in range(0, len(labels), columns * rows_per_page):
             page = PILImage.new("RGB", (page_width, page_height), "white")
-            page_items = productos_procesados[page_start:page_start + columns * rows_per_page]
-            for index, (producto, _) in enumerate(page_items):
+            page_items = labels[page_start:page_start + columns * rows_per_page]
+            for index, producto in enumerate(page_items):
                 column, row = index % columns, index // columns
                 left, top = column * cell_width, row * cell_height
                 label_content = InventarioService.generate_qr_image(
