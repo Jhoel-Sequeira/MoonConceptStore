@@ -280,7 +280,7 @@ class InventarioService:
         return True
 
     @staticmethod
-    def generate_qr_image(data_text: str, name: str, sku: str, price=None) -> io.BytesIO:
+    def generate_qr_image(data_text: str, sku: str, price=None) -> io.BytesIO:
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_M,
@@ -290,14 +290,6 @@ class InventarioService:
         qr.add_data(data_text.encode("utf-8"), optimize=0)
         qr.make(fit=True)
         qr_image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        serif_bold_paths = (
-            "C:/Windows/Fonts/arialbd.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation2/LiberationSerif-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf",
-            "C:/Windows/Fonts/georgiab.ttf",
-        )
         regular_paths = (
             "C:/Windows/Fonts/arial.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf",
@@ -327,7 +319,6 @@ class InventarioService:
             # ponytail: Pillow 10.1+ supplies a scalable built-in font when OS fonts are unavailable.
             return ImageFont.load_default(size=size), True
 
-        title_font, title_fallback = load_label_font(serif_bold_paths, 54)
         detail_font, detail_fallback = load_label_font(regular_paths, 30)
         price_font, price_fallback = load_label_font(bold_paths, 44)
 
@@ -339,21 +330,13 @@ class InventarioService:
         center_x = width // 2
         card.paste(qr_image, ((width - qr_image.width) // 2, 58))
 
-        title = name or "Producto"
-        title_size = 54
-        while title_size > 30 and draw.textbbox((0, 0), title, font=title_font)[2] > 760:
-            title_size -= 2
-            title_font, title_fallback = load_label_font(serif_bold_paths, title_size)
-        sku_label = f"SKU: {sku}"
+        sku_label = f"Codigo: {sku}"
         detail_size = 30
         while detail_size > 24 and draw.textbbox((0, 0), sku_label, font=detail_font)[2] > 760:
             detail_size -= 2
             detail_font, detail_fallback = load_label_font(regular_paths, detail_size)
-        draw.text((center_x, 440), title, fill="#111111", font=title_font, anchor="mt", stroke_width=1 if title_fallback else 0, stroke_fill="#111111")
-        draw.line((315, 505, 585, 505), fill="#d2d2d2", width=3)
-        draw.text((center_x, 521), sku_label, fill="#555555", font=detail_font, anchor="mt")
-        draw.line((315, 575, 585, 575), fill="#d2d2d2", width=3)
-        draw.text((center_x, 593), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt", stroke_width=1 if price_fallback else 0, stroke_fill="#111111")
+        draw.text((center_x, 465), sku_label, fill="#555555", font=detail_font, anchor="mt")
+        draw.text((center_x, 530), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt", stroke_width=1 if price_fallback else 0, stroke_fill="#111111")
         img = card
         buf = io.BytesIO()
         img.save(buf, format="PNG")

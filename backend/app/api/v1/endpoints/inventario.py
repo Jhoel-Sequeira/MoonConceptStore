@@ -37,7 +37,7 @@ def export_qr_word(product_ids: List[int] = Body(...), db: Session = Depends(get
     for index, product_id in enumerate(dict.fromkeys(product_ids), start=1):
         product = by_id[product_id]
         image = InventarioService.generate_qr_image(
-            product.codigo_qr or f"BHPOS-{product.sku}", product.nombre, product.sku, product.precio
+            product.codigo_qr or f"BHPOS-{product.sku}", product.sku, product.precio
         ).getvalue()
         rel_id = f"rId{index}"
         images.append((f"word/media/qr{index}.png", image))
@@ -53,7 +53,6 @@ def export_qr_word(product_ids: List[int] = Body(...), db: Session = Depends(get
             f'<pic:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
             f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="2743200" cy="2194560"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
             f'</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
-            f'<w:p><w:r><w:t>{escape(product.nombre or "Producto")} — SKU: {escape(product.sku or "")}</w:t></w:r></w:p>'
         )
 
     xml_document = (
@@ -303,7 +302,7 @@ def get_qr_image(producto_id: int, db: Session = Depends(get_db)):
         )
     
     qr_data = producto.codigo_qr or f"BHPOS-{producto.sku}"
-    qr_buf = InventarioService.generate_qr_image(qr_data, producto.nombre, producto.sku, producto.precio)
+    qr_buf = InventarioService.generate_qr_image(qr_data, producto.sku, producto.precio)
     return Response(content=qr_buf.getvalue(), media_type="image/png")
 
 @router.post("/{producto_id}/generar-qr")
@@ -316,7 +315,7 @@ def regenerate_and_save_qr(producto_id: int, db: Session = Depends(get_db)):
             detail=f"Producto con ID {producto_id} no encontrado"
         )
     
-    qr_image = InventarioService.generate_qr_image(producto.codigo_qr or f"BHPOS-{producto.sku}", producto.nombre, producto.sku, producto.precio)
+    qr_image = InventarioService.generate_qr_image(producto.codigo_qr or f"BHPOS-{producto.sku}", producto.sku, producto.precio)
     qr_rel_path = upload_image(
         f"moonconcept/qr/{producto.id}", "codigo.png", qr_image.getvalue(), "image/png"
     )

@@ -902,7 +902,6 @@ class MarcasService:
                 left, top = column * cell_width, row * cell_height
                 label_content = InventarioService.generate_qr_image(
                     producto.codigo_qr or f"BHPOS-{producto.sku}",
-                    producto.nombre,
                     producto.sku,
                     producto.precio,
                 )
