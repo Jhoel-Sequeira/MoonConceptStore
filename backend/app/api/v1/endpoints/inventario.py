@@ -45,27 +45,27 @@ def export_qr_word(product_ids: List[int] = Body(...), db: Session = Depends(get
             f'<Relationship Id="{rel_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/qr{index}.png"/>'
         )
         cell = (
-            f'<w:tc><w:tcPr><w:tcW w:w="5400" w:type="dxa"/></w:tcPr>'
-            f'<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline><wp:extent cx="2468880" cy="1975104"/><wp:effectExtent l="0" t="0" r="0" b="0"/>'
+            f'<w:tc><w:tcPr><w:tcW w:w="2700" w:type="dxa"/></w:tcPr>'
+            f'<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline><wp:extent cx="1508760" cy="1207008"/><wp:effectExtent l="0" t="0" r="0" b="0"/>'
             f'<wp:docPr id="{index}" name="QR {escape(product.sku or str(product.id))}"/>'
             f'<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
             f'<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
             f'<pic:pic><pic:nvPicPr><pic:cNvPr id="{index}" name="QR {escape(product.sku or str(product.id))}.png"/><pic:cNvPicPr/></pic:nvPicPr>'
             f'<pic:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
-            f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="2468880" cy="1975104"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+            f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1508760" cy="1207008"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
             f'</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p></w:tc>'
         )
-        if index % 2:
+        if index % 4 == 1:
             document_rows.append([cell])
         else:
             document_rows[-1].append(cell)
 
-    if len(document_rows[-1]) == 1:
-        document_rows[-1].append('<w:tc><w:tcPr><w:tcW w:w="5400" w:type="dxa"/></w:tcPr><w:p/></w:tc>')
+    while len(document_rows[-1]) < 4:
+        document_rows[-1].append('<w:tc><w:tcPr><w:tcW w:w="2700" w:type="dxa"/></w:tcPr><w:p/></w:tc>')
     table = (
         '<w:tbl><w:tblPr><w:tblW w:w="10800" w:type="dxa"/><w:tblLayout w:type="fixed"/>'
         '<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders></w:tblPr>'
-        '<w:tblGrid><w:gridCol w:w="5400"/><w:gridCol w:w="5400"/></w:tblGrid>'
+        '<w:tblGrid><w:gridCol w:w="2700"/><w:gridCol w:w="2700"/><w:gridCol w:w="2700"/><w:gridCol w:w="2700"/></w:tblGrid>'
         + ''.join('<w:tr>' + ''.join(row) + '</w:tr>' for row in document_rows)
         + '</w:tbl>'
     )
