@@ -326,17 +326,17 @@ class InventarioService:
         card = Image.new("RGB", (width, height), "white")
         draw = ImageDraw.Draw(card)
         draw.rounded_rectangle((48, 30, width - 48, height - 30), radius=28, fill="white", outline="#d2d2d2", width=4)
-        qr_image.thumbnail((370, 370))
+        qr_image.thumbnail((450, 450))
         center_x = width // 2
-        card.paste(qr_image, ((width - qr_image.width) // 2, 58))
+        card.paste(qr_image, ((width - qr_image.width) // 2, 38))
 
         sku_label = f"Codigo: {sku}"
         detail_size = 30
         while detail_size > 24 and draw.textbbox((0, 0), sku_label, font=detail_font)[2] > 760:
             detail_size -= 2
             detail_font, detail_fallback = load_label_font(regular_paths, detail_size)
-        draw.text((center_x, 465), sku_label, fill="#555555", font=detail_font, anchor="mt")
-        draw.text((center_x, 530), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt", stroke_width=1 if price_fallback else 0, stroke_fill="#111111")
+        draw.text((center_x, 510), sku_label, fill="#555555", font=detail_font, anchor="mt")
+        draw.text((center_x, 570), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt", stroke_width=1 if price_fallback else 0, stroke_fill="#111111")
         img = card
         buf = io.BytesIO()
         img.save(buf, format="PNG")
