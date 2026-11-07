@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, UploadFile, File, Body
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from io import BytesIO
+from zipfile import ZIP_DEFLATED, ZipFile
+from xml.sax.saxutils import escape
 from PIL import Image
 from app.core.storage import delete_image, upload_image
 from app.core.database import get_db
@@ -18,6 +20,62 @@ from app.models.inventario import Producto
 from app.core.categories import PRODUCT_CATEGORIES
 
 router = APIRouter()
+
+@router.post("/qr-word")
+def export_qr_word(product_ids: List[int] = Body(...), db: Session = Depends(get_db)):
+    """Create an editable Word document with one high-resolution QR label image per product."""
+    if not product_ids:
+        raise HTTPException(status_code=422, detail="Selecciona al menos un producto")
+    products = db.query(Producto).filter(Producto.id.in_(set(product_ids))).all()
+    by_id = {product.id: product for product in products}
+    if len(by_id) != len(set(product_ids)):
+        raise HTTPException(status_code=404, detail="Uno o más productos ya no existen")
+
+    document_parts = []
+    relationships = []
+    images = []
+    for index, product_id in enumerate(dict.fromkeys(product_ids), start=1):
+        product = by_id[product_id]
+        image = InventarioService.generate_qr_image(
+            product.codigo_qr or f"BHPOS-{product.sku}", product.nombre, product.sku, product.precio
+        ).getvalue()
+        rel_id = f"rId{index}"
+        images.append((f"word/media/qr{index}.png", image))
+        relationships.append(
+            f'<Relationship Id="{rel_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/qr{index}.png"/>'
+        )
+        document_parts.append(
+            f'<w:p><w:r><w:drawing><wp:inline><wp:extent cx="2743200" cy="2194560"/><wp:effectExtent l="0" t="0" r="0" b="0"/>'
+            f'<wp:docPr id="{index}" name="QR {escape(product.sku or str(product.id))}"/>'
+            f'<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
+            f'<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+            f'<pic:pic><pic:nvPicPr><pic:cNvPr id="{index}" name="QR {escape(product.sku or str(product.id))}.png"/><pic:cNvPicPr/></pic:nvPicPr>'
+            f'<pic:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+            f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="2743200" cy="2194560"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+            f'</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
+            f'<w:p><w:r><w:t>{escape(product.nombre or "Producto")} — SKU: {escape(product.sku or "")}</w:t></w:r></w:p>'
+        )
+
+    xml_document = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+        'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>'
+        + ''.join(document_parts)
+        + '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/></w:sectPr></w:body></w:document>'
+    )
+    output = BytesIO()
+    with ZipFile(output, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
+        archive.writestr("_rels/.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
+        archive.writestr("word/_rels/document.xml.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + ''.join(relationships) + '</Relationships>')
+        archive.writestr("word/document.xml", xml_document)
+        for path, image in images:
+            archive.writestr(path, image)
+    output.seek(0)
+    return Response(content=output.getvalue(), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={"Content-Disposition": "attachment; filename=Codigos_QR.docx"})
 
 @router.get("/", response_model=List[ProductoResponse])
 def get_productos(

@@ -71,6 +71,8 @@ export const inventarioService = {
     const response = await api.post(`/inventario/${id}/generar-qr`);
     return response.data;
   },
+
+  exportQrWord: async (productIds) => api.post('/inventario/qr-word', productIds, { responseType: 'blob' }),
 };
 
 export default inventarioService;

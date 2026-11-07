@@ -328,6 +328,7 @@ export default function POSPage() {
       });
       setInvoice({
         ...result,
+        fecha_venta: new Date().toISOString(),
         efectivo_recibido: paymentMethod === 'Efectivo' ? cashReceivedCents / 100 : null,
         vuelto: paymentMethod === 'Efectivo' ? changeCents / 100 : null,
       });
