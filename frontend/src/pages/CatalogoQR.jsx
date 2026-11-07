@@ -6,6 +6,7 @@ import brandConfig from '../brandConfig';
 import { formatCordobas } from '../utils/currency';
 import { RUBROS, RUBRO_FIELDS } from '../constants/rubros';
 import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
+import api from '../services/api';
 
 export default function CatalogoQRPage() {
   const location = useLocation();
@@ -23,6 +24,7 @@ export default function CatalogoQRPage() {
   const [productToEdit, setProductToEdit] = useState(null);
   const [detailProduct, setDetailProduct] = useState(null);
   const [isGeneratingQr, setIsGeneratingQr] = useState(false);
+  const [isExportingQr, setIsExportingQr] = useState(false);
   const [photoFiles, setPhotoFiles] = useState([]);
   const [photoPreviewUrls, setPhotoPreviewUrls] = useState([]);
   const [removedPhotoUrls, setRemovedPhotoUrls] = useState([]);
@@ -287,6 +289,41 @@ export default function CatalogoQRPage() {
     window.print();
   };
 
+  const handleExportQrWord = async () => {
+    if (!selectedList.length || isExportingQr) return;
+    setIsExportingQr(true);
+    try {
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>\"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[char]));
+      const entries = await Promise.all(selectedList.map(async (product) => {
+        const result = await inventarioService.generarQrEnServidor(product.id);
+        const imageUrl = inventarioService.getQrImageUrl(product.id, product.sku, result.qr_image_url);
+        const image = await api.get(imageUrl, { responseType: 'blob' });
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(image.data);
+        });
+        return `<div class="label"><img src="${dataUrl}" alt="QR ${escapeHtml(product.sku)}"><strong>${escapeHtml(product.nombre)}</strong><span>${escapeHtml(product.sku)}</span></div>`;
+      }));
+      // ponytail: Word opens this HTML .doc with embedded, individually editable QR images; native .docx needs a ZIP package dependency.
+      const htmlDocument = `<html><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif}.sheet{display:flex;flex-wrap:wrap;gap:16px}.label{width:210px;min-height:150px;border:1px solid #bbb;padding:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;page-break-inside:avoid}.label img{width:110px;height:110px;object-fit:contain}.label span{font-size:12px}</style></head><body><div class="sheet">${entries.join('')}</div></body></html>`;
+      const blob = new Blob(['\ufeff', htmlDocument], { type: 'application/msword;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'Codigos_QR.doc';
+      link.click();
+      URL.revokeObjectURL(url);
+      notify(`Se descargó el documento Word con ${entries.length} códigos QR.`, 'success');
+    } catch (err) {
+      console.error('Error exportando QR a Word:', err);
+      notify(err.response?.data?.detail || 'No se pudo crear el documento Word de códigos QR.', 'error');
+    } finally {
+      setIsExportingQr(false);
+    }
+  };
+
   const handleExportCSV = () => {
     if (productos.length === 0) return;
     const headers = ['ID', 'SKU', 'Producto', 'Marca', 'Rubro', 'Precio (C$)', 'Stock Actual', 'QR Código'];
@@ -437,6 +474,10 @@ export default function CatalogoQRPage() {
           >
             <span className="material-symbols-outlined text-[18px] text-on-surface-variant">table_chart</span>
             <span>Exportar CSV</span>
+          </button>
+          <button onClick={handleExportQrWord} disabled={!selectedList.length || isExportingQr} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-primary text-on-primary font-label-md text-label-md hover:opacity-90 disabled:opacity-50" type="button">
+            <span className="material-symbols-outlined text-[18px]">description</span>
+            <span>{isExportingQr ? 'Preparando Word…' : `QR en Word (${selectedList.length})`}</span>
           </button>
           {/* <button
             onClick={handlePrintLabels}
