@@ -64,14 +64,20 @@ export default function RecepcionPage() {
 
   const closeDetail = () => { setSelected(null); setDetail(null); setDetailError(''); };
 
-  const downloadQrPdf = async () => {
+  const downloadQrWord = async () => {
     if (!detail || downloadingQr) return;
     try {
       setDownloadingQr(true);
-      const count = await recepcionService.downloadQrPdf(detail.ingreso_id);
-      notify(`Se descargó el PDF con ${count} códigos QR de esta importación.`, 'success');
+      const { data: blob } = await inventarioService.exportQrWord(detail.productos.map((product) => product.id));
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `QR_Recepcion_${detail.ingreso_id}.docx`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      notify(`Se descargaron ${detail.productos.length} codigos QR en Word.`, 'success');
     } catch (err) {
-      notify(err.response?.data?.detail || 'No se pudo regenerar el PDF de códigos QR.', 'error');
+      notify(err.response?.data?.detail || 'No se pudo crear el documento Word de codigos QR.', 'error');
     } finally {
       setDownloadingQr(false);
     }
@@ -152,8 +158,8 @@ export default function RecepcionPage() {
               </table>
             </div>
             <footer className="flex flex-wrap justify-between gap-2 border-t border-surface-container-low p-4">
-              <button type="button" disabled={downloadingQr || !detail.productos.length} onClick={downloadQrPdf} className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/60 px-4 py-2 text-sm font-semibold text-on-surface hover:bg-surface-container-low disabled:opacity-50">
-                <span className="material-symbols-outlined text-lg">qr_code_2</span>{downloadingQr ? 'Generando QR…' : 'Volver a descargar QR'}
+              <button type="button" disabled={downloadingQr || !detail.productos.length} onClick={downloadQrWord} className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/60 px-4 py-2 text-sm font-semibold text-on-surface hover:bg-surface-container-low disabled:opacity-50">
+                <span className="material-symbols-outlined text-lg">description</span>{downloadingQr ? 'Preparando Word...' : 'Volver a descargar QR (.docx)'}
               </button>
               <button type="button" onClick={closeDetail} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white">Cerrar</button>
             </footer>
