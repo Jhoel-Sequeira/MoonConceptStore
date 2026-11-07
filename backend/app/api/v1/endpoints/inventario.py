@@ -11,6 +11,8 @@ from app.api.deps import get_current_user
 from app.models.usuarios import Usuario
 from app.schemas.inventario import (
     ProductoCreate,
+    ArticuloCreate,
+    VarianteCreate,
     ProductoUpdate,
     ProductoResponse,
     InventarioStats
@@ -20,6 +22,37 @@ from app.models.inventario import Producto
 from app.core.categories import PRODUCT_CATEGORIES
 
 router = APIRouter()
+
+
+@router.post("/articulos", status_code=status.HTTP_201_CREATED)
+def create_articulo(
+    item_in: ArticuloCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Create one shared article and its independently stocked variants."""
+    try:
+        return InventarioService.create_article(db, item_in, current_user.id)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/articulos/{articulo_id}/variantes", status_code=status.HTTP_201_CREATED)
+def add_articulo_variantes(
+    articulo_id: int,
+    variantes: List[VarianteCreate] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    try:
+        if not variantes:
+            raise ValueError("Agrega al menos una variante")
+        return InventarioService.add_article_variants(db, articulo_id, variantes, current_user.id)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
 
 @router.post("/qr-word")
 def export_qr_word(product_ids: List[int] = Body(...), db: Session = Depends(get_db)):
@@ -165,17 +198,20 @@ def delete_producto(producto_id: int, db: Session = Depends(get_db)):
     """Eliminar un producto de inventario"""
     try:
         producto = db.query(Producto).filter(Producto.id == producto_id).first()
-        image_urls = list(producto.imagenes or []) if producto else []
-        if producto and producto.imagen_url and producto.imagen_url not in image_urls:
-            image_urls.append(producto.imagen_url)
+        image_owner = (producto.articulo or producto) if producto else None
+        image_urls = list(image_owner.imagenes or []) if image_owner else []
+        if image_owner and image_owner.imagen_url and image_owner.imagen_url not in image_urls:
+            image_urls.append(image_owner.imagen_url)
+        remove_shared_images = bool(producto and producto.articulo and len(producto.articulo.variantes) == 1)
         success = InventarioService.delete(db, producto_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Producto con ID {producto_id} no encontrado"
             )
-        for image_url in image_urls:
-            delete_image(image_url)
+        if not producto or not producto.articulo or remove_shared_images:
+            for image_url in image_urls:
+                delete_image(image_url)
         return {"message": "Producto eliminado exitosamente"}
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -190,6 +226,7 @@ def upload_product_photo(
     producto = db.query(Producto).filter(Producto.id == producto_id).first()
     if not producto:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
+    image_owner = producto.articulo or producto
 
     image_bytes = file.file.read(8 * 1024 * 1024 + 1)
     if not image_bytes:
@@ -210,11 +247,12 @@ def upload_product_photo(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato no permitido. Usa JPG, PNG o WEBP")
 
     content_type = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}[extension]
-    image_url = upload_image(f"moonconcept/productos/{producto_id}", f"producto{extension}", image_bytes, content_type)
-    producto.imagen_url = image_url
-    producto.imagenes = list(producto.imagenes or [])
-    if producto.imagen_url not in producto.imagenes:
-        producto.imagenes.append(producto.imagen_url)
+    image_folder = f"moonconcept/articulos/{image_owner.id}" if producto.articulo else f"moonconcept/productos/{producto_id}"
+    image_url = upload_image(image_folder, f"producto{extension}", image_bytes, content_type)
+    image_owner.imagen_url = image_url
+    image_owner.imagenes = list(image_owner.imagenes or [])
+    if image_url not in image_owner.imagenes:
+        image_owner.imagenes.append(image_url)
     try:
         db.commit()
     except Exception:
@@ -222,7 +260,7 @@ def upload_product_photo(
         delete_image(image_url)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudo guardar la foto del producto")
 
-    return {"imagen_url": producto.imagen_url}
+    return {"imagen_url": image_owner.imagen_url}
 
 @router.post("/{producto_id}/fotos")
 def upload_product_photos(
@@ -234,10 +272,11 @@ def upload_product_photos(
     producto = db.query(Producto).filter(Producto.id == producto_id).first()
     if not producto:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
+    image_owner = producto.articulo or producto
     if not files or len(files) > 10:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selecciona entre 1 y 10 fotos por carga")
 
-    current_images = list(producto.imagenes or [])
+    current_images = list(image_owner.imagenes or [])
     if len(current_images) + len(files) > 10:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cada producto admite un máximo de 10 fotos")
 
@@ -263,13 +302,14 @@ def upload_product_photos(
     try:
         for image_bytes, extension in prepared:
             content_type = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}[extension]
-            new_urls.append(upload_image(f"moonconcept/productos/{producto_id}", f"producto{extension}", image_bytes, content_type))
+            image_folder = f"moonconcept/articulos/{image_owner.id}" if producto.articulo else f"moonconcept/productos/{producto_id}"
+            new_urls.append(upload_image(image_folder, f"producto{extension}", image_bytes, content_type))
 
-        producto.imagenes = current_images + new_urls
-        if not producto.imagen_url:
-            producto.imagen_url = new_urls[0]
+        image_owner.imagenes = current_images + new_urls
+        if not image_owner.imagen_url:
+            image_owner.imagen_url = new_urls[0]
         db.commit()
-        db.refresh(producto)
+        db.refresh(image_owner)
     except Exception as exc:
         db.rollback()
         for image_url in new_urls:
@@ -278,7 +318,7 @@ def upload_product_photos(
             raise
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudieron guardar las fotos del producto") from exc
 
-    return {"imagenes": producto.imagenes, "imagen_url": producto.imagen_url}
+    return {"imagenes": image_owner.imagenes, "imagen_url": image_owner.imagen_url}
 
 @router.delete("/{producto_id}/fotos")
 def delete_product_photo(
@@ -290,13 +330,14 @@ def delete_product_photo(
     producto = db.query(Producto).filter(Producto.id == producto_id).first()
     if not producto:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
-    current_images = list(producto.imagenes or ([producto.imagen_url] if producto.imagen_url else []))
+    image_owner = producto.articulo or producto
+    current_images = list(image_owner.imagenes or ([image_owner.imagen_url] if image_owner.imagen_url else []))
     if image_url not in current_images:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="La foto no pertenece a este producto")
 
-    producto.imagenes = [url for url in current_images if url != image_url]
-    if producto.imagen_url == image_url:
-        producto.imagen_url = producto.imagenes[0] if producto.imagenes else None
+    image_owner.imagenes = [url for url in current_images if url != image_url]
+    if image_owner.imagen_url == image_url:
+        image_owner.imagen_url = image_owner.imagenes[0] if image_owner.imagenes else None
     try:
         db.commit()
     except Exception as exc:
@@ -304,7 +345,7 @@ def delete_product_photo(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudo quitar la foto del producto") from exc
 
     delete_image(image_url)
-    return {"imagenes": producto.imagenes, "imagen_url": producto.imagen_url}
+    return {"imagenes": image_owner.imagenes, "imagen_url": image_owner.imagen_url}
 
 @router.get("/{producto_id}/qr-image")
 def get_qr_image(producto_id: int, db: Session = Depends(get_db)):

@@ -7,7 +7,7 @@ import os
 import re
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
-from app.models.inventario import Producto, Kardex
+from app.models.inventario import Producto, Kardex, Articulo
 from app.models.marcas import Marca
 from app.schemas.inventario import ProductoCreate, ProductoUpdate, ProductoResponse, InventarioStats
 from app.core.categories import validate_category_details
@@ -68,26 +68,31 @@ class InventarioService:
         
         qr_rel_path = f"/api/v1/inventario/{p.id}/qr-image"
         
+        common = p.articulo
         return ProductoResponse(
             id=p.id,
             sku=p.sku,
-            nombre=p.nombre,
-            descripcion=p.descripcion,
+            nombre=common.nombre if common else p.nombre,
+            descripcion=common.descripcion if common else p.descripcion,
             tamano=p.tamano,
-            precio=float(p.precio or 0),
-            stock_critico=5 if p.stock_critico is None else int(p.stock_critico),
-            imagen_url=p.imagen_url,
-            imagenes=p.imagenes or ([p.imagen_url] if p.imagen_url else []),
+            precio=float((common.precio if common else p.precio) or 0),
+            stock_critico=5 if (common.stock_critico if common else p.stock_critico) is None else int(common.stock_critico if common else p.stock_critico),
+            imagen_url=common.imagen_url if common else p.imagen_url,
+            imagenes=(common.imagenes or ([common.imagen_url] if common.imagen_url else [])) if common else (p.imagenes or ([p.imagen_url] if p.imagen_url else [])),
             estado_id=p.estado_id or 1,
             codigo_qr=p.codigo_qr or f"BHPOS-{p.sku}",
             qr_image_url=qr_rel_path,
             marca_id=p.marca_id,
             marca_nombre=marca_nom,
-            categoria=p.categoria or (p.marca.categoria if p.marca else "ROPA VARIADA"),
-            detalles_rubro=p.detalles_rubro or {},
+            categoria=(common.categoria if common else p.categoria) or (p.marca.categoria if p.marca else "ROPA VARIADA"),
+            detalles_rubro=(common.detalles_rubro if common else p.detalles_rubro) or {},
             marca_codigo=marca_cod,
             stock_actual=int(stock),
-            qr_status="Generado" if p.codigo_qr else "Pendiente Imprimir"
+            qr_status="Generado" if p.codigo_qr else "Pendiente Imprimir",
+            articulo_id=p.articulo_id,
+            codigo_articulo=common.codigo if common else None,
+            talla=p.tamano,
+            color=p.color,
         )
 
     @staticmethod
@@ -109,9 +114,12 @@ class InventarioService:
                 | (Producto.sku.ilike(s))
                 | (Producto.codigo_qr.ilike(s))
                 | (Producto.descripcion.ilike(s))
+                | (Producto.tamano.ilike(s))
+                | (Producto.color.ilike(s))
+                | (Producto.articulo.has(Articulo.codigo.ilike(s)))
             )
             
-        productos = query.options(joinedload(Producto.marca)).order_by(Producto.id.desc()).all()
+        productos = query.options(joinedload(Producto.marca), joinedload(Producto.articulo)).order_by(Producto.id.desc()).all()
         stocks = InventarioService._get_stock_by_product(db, [p.id for p in productos])
         return [InventarioService.map_to_response(db, p, stocks.get(p.id, 0)) for p in productos]
 
@@ -164,6 +172,7 @@ class InventarioService:
             nombre=item_in.nombre.strip(),
             descripcion=item_in.descripcion,
             tamano=item_in.tamano,
+            color=item_in.color,
             precio=item_in.precio,
             stock_critico=5 if item_in.stock_critico is None else item_in.stock_critico,
             imagen_url=item_in.imagen_url,
@@ -190,12 +199,114 @@ class InventarioService:
         return InventarioService.map_to_response(db, nuevo)
 
     @staticmethod
+    def create_article(db: Session, item_in, usuario_id: int = 1) -> List[ProductoResponse]:
+        code = item_in.codigo.strip().upper()
+        if not code:
+            raise ValueError("El código del artículo es obligatorio")
+        if not item_in.nombre.strip():
+            raise ValueError("El nombre del artículo es obligatorio")
+        if db.query(Articulo.id).filter(func.upper(Articulo.codigo) == code).first():
+            raise ValueError(f"El código de artículo {code} ya está registrado")
+        skus = [variant.sku.strip().upper() for variant in item_in.variantes]
+        if len(set(skus)) != len(skus):
+            raise ValueError("Cada variante debe tener un SKU diferente")
+        if any(not sku for sku in skus):
+            raise ValueError("Todas las variantes deben tener un SKU")
+        combinations = [((variant.talla or "").strip().casefold(), (variant.color or "").strip().casefold()) for variant in item_in.variantes]
+        if len(set(combinations)) != len(combinations):
+            raise ValueError("No repitas la misma combinación de talla y color")
+        existing = db.query(Producto.sku).filter(func.upper(Producto.sku).in_(skus)).first()
+        if existing:
+            raise ValueError(f"El SKU {existing[0]} ya está registrado")
+        marca = db.query(Marca).filter(Marca.id == item_in.marca_id).first()
+        if not marca:
+            raise ValueError("La marca seleccionada no existe")
+        category = marca.categoria or "ROPA VARIADA"
+        article = Articulo(
+            codigo=code, marca_id=marca.id, categoria=category,
+            detalles_rubro=validate_category_details(category, item_in.detalles_rubro),
+            nombre=item_in.nombre.strip(), descripcion=item_in.descripcion, precio=item_in.precio,
+            stock_critico=item_in.stock_critico, imagen_url=item_in.imagen_url,
+            imagenes=item_in.imagenes, estado_id=item_in.estado_id,
+        )
+        db.add(article)
+        db.flush()
+        variants = []
+        for variant, sku in zip(item_in.variantes, skus):
+            product = Producto(
+                articulo_id=article.id, color=(variant.color or "").strip() or None,
+                marca_id=marca.id, categoria=category, detalles_rubro=article.detalles_rubro,
+                sku=sku, codigo_qr=f"BHPOS-{sku}", nombre=article.nombre,
+                descripcion=article.descripcion, precio=article.precio,
+                tamano=(variant.talla or "").strip() or None, stock_inicial=0,
+                stock_critico=article.stock_critico, imagen_url=article.imagen_url,
+                imagenes=article.imagenes, estado_id=article.estado_id,
+            )
+            db.add(product)
+            db.flush()
+            if variant.stock_inicial:
+                db.add(Kardex(producto_id=product.id, usuario_id=usuario_id,
+                    tipo_movimiento="INGRESO", cantidad=variant.stock_inicial,
+                    motivo=f"Stock inicial de variante del artículo {code}"))
+            variants.append(product)
+        db.commit()
+        return [InventarioService.map_to_response(db, product) for product in variants]
+
+    @staticmethod
+    def add_article_variants(db: Session, article_id: int, variants_in, usuario_id: int = 1) -> List[ProductoResponse]:
+        article = db.query(Articulo).filter(Articulo.id == article_id).with_for_update().first()
+        if not article:
+            raise ValueError("El artículo no existe")
+        skus = [variant.sku.strip().upper() for variant in variants_in]
+        if any(not sku for sku in skus) or len(set(skus)) != len(skus):
+            raise ValueError("Cada variante debe tener un SKU diferente")
+        existing = db.query(Producto.sku).filter(func.upper(Producto.sku).in_(skus)).first()
+        if existing:
+            raise ValueError(f"El SKU {existing[0]} ya está registrado")
+        combinations = {( (variant.tamano or "").strip().casefold(), (variant.color or "").strip().casefold() ) for variant in article.variantes}
+        new_combinations = [((variant.talla or "").strip().casefold(), (variant.color or "").strip().casefold()) for variant in variants_in]
+        if len(set(new_combinations)) != len(new_combinations) or combinations.intersection(new_combinations):
+            raise ValueError("El artículo ya tiene esa combinación de talla y color")
+        products = []
+        for variant, sku in zip(variants_in, skus):
+            product = Producto(
+                articulo_id=article.id, color=(variant.color or "").strip() or None,
+                marca_id=article.marca_id, categoria=article.categoria,
+                detalles_rubro=article.detalles_rubro, sku=sku, codigo_qr=f"BHPOS-{sku}",
+                nombre=article.nombre, descripcion=article.descripcion, precio=article.precio,
+                tamano=(variant.talla or "").strip() or None, stock_inicial=0,
+                stock_critico=article.stock_critico, imagen_url=article.imagen_url,
+                imagenes=article.imagenes, estado_id=article.estado_id,
+            )
+            db.add(product)
+            db.flush()
+            if variant.stock_inicial:
+                db.add(Kardex(producto_id=product.id, usuario_id=usuario_id,
+                    tipo_movimiento="INGRESO", cantidad=variant.stock_inicial,
+                    motivo=f"Stock inicial de variante del artículo {article.codigo}"))
+            products.append(product)
+        db.commit()
+        return [InventarioService.map_to_response(db, product) for product in products]
+
+    @staticmethod
     def update(db: Session, producto_id: int, item_in: ProductoUpdate, usuario_id: int = 1) -> Optional[ProductoResponse]:
         p = db.query(Producto).filter(Producto.id == producto_id).with_for_update().first()
         if not p:
             return None
         
         update_data = item_in.dict(exclude_unset=True)
+        article = p.articulo
+        shared_fields = {"nombre", "descripcion", "precio", "stock_critico", "imagen_url", "imagenes", "estado_id", "marca_id", "categoria", "detalles_rubro"}
+        shared_updates = {key: update_data.pop(key) for key in list(update_data) if article and key in shared_fields}
+        for field in ("marca_id", "precio", "stock_critico", "estado_id"):
+            if field in shared_updates and shared_updates[field] is None:
+                raise ValueError(f"El campo {field} no puede quedar vacío")
+        if article and "marca_id" in shared_updates and not db.query(Marca.id).filter(Marca.id == shared_updates["marca_id"]).first():
+            raise ValueError("La marca seleccionada no existe")
+        if article and "nombre" in shared_updates:
+            shared_updates["nombre"] = (shared_updates["nombre"] or "").strip()
+            if not shared_updates["nombre"]:
+                raise ValueError("El nombre del artículo es obligatorio")
         stock_was_sent = "stock_actual" in update_data
         target_stock = update_data.pop("stock_actual", None)
         if "sku" in update_data:
@@ -231,6 +342,25 @@ class InventarioService:
         try:
             if "sku" in update_data:
                 p.codigo_qr = f"BHPOS-{update_data['sku']}"
+            if shared_updates:
+                for key, value in shared_updates.items():
+                    setattr(article, key, value)
+                if "marca_id" in shared_updates or "categoria" in shared_updates:
+                    brand_id = shared_updates.get("marca_id", article.marca_id)
+                    category = db.query(Marca).filter(Marca.id == brand_id).first().categoria
+                    article.categoria = category
+                    for variant in article.variantes:
+                        variant.marca_id = brand_id
+                        variant.categoria = category
+                        if "detalles_rubro" not in shared_updates:
+                            variant.detalles_rubro = {}
+                if "detalles_rubro" in shared_updates:
+                    article.detalles_rubro = validate_category_details(article.categoria, shared_updates["detalles_rubro"])
+                for variant in article.variantes:
+                    for key, value in shared_updates.items():
+                        if key not in {"marca_id", "categoria", "detalles_rubro"}:
+                            setattr(variant, key, value)
+                    variant.detalles_rubro = article.detalles_rubro
             for key, val in update_data.items():
                 setattr(p, key, val)
             if target_stock is not None:
@@ -275,7 +405,10 @@ class InventarioService:
             raise ValueError("No se puede eliminar: el producto tiene movimientos o documentos asociados y debe conservar su historial.")
         # Eliminar registros de kardex asociados primero
         db.query(Kardex).filter(Kardex.producto_id == producto_id).delete()
+        article = p.articulo
         db.delete(p)
+        if article and len(article.variantes) <= 1:
+            db.delete(article)
         db.commit()
         return True
 

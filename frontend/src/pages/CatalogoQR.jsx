@@ -24,6 +24,8 @@ export default function CatalogoQRPage() {
   const [detailProduct, setDetailProduct] = useState(null);
   const [isGeneratingQr, setIsGeneratingQr] = useState(false);
   const [isExportingQr, setIsExportingQr] = useState(false);
+  const [addingVariant, setAddingVariant] = useState(false);
+  const [variantDraft, setVariantDraft] = useState({ sku: '', talla: '', color: '', stock_inicial: 0 });
   const [photoFiles, setPhotoFiles] = useState([]);
   const [photoPreviewUrls, setPhotoPreviewUrls] = useState([]);
   const [removedPhotoUrls, setRemovedPhotoUrls] = useState([]);
@@ -35,6 +37,8 @@ export default function CatalogoQRPage() {
 
   // Formulario producto (Crear / Editar)
   const [formData, setFormData] = useState({
+    codigo_articulo: '',
+    variantes: [{ sku: '', talla: '', color: '', stock_inicial: 0 }],
     sku: '',
     nombre: '',
     marca_id: '',
@@ -139,6 +143,8 @@ export default function CatalogoQRPage() {
     setRemovedPhotoUrls([]);
     setActivePhoto('');
     setFormData({
+      codigo_articulo: '',
+      variantes: [{ sku: '', talla: '', color: '', stock_inicial: 0 }],
       sku: '',
       nombre: '',
       marca_id: marcas[0]?.id || '',
@@ -162,7 +168,10 @@ export default function CatalogoQRPage() {
     setRemovedPhotoUrls([]);
     setActivePhoto(product.imagen_url || product.imagenes?.[0] || '');
     setFormData({
+      codigo_articulo: '',
+      variantes: [{ sku: product.sku, talla: product.talla || product.tamano || '', color: product.color || '', stock_inicial: product.stock_actual }],
       sku: product.sku,
+      color: product.color || '',
       nombre: product.nombre,
       marca_id: product.marca_id,
       precio: product.precio,
@@ -191,6 +200,19 @@ export default function CatalogoQRPage() {
     }
   };
 
+  const handleAddVariant = async (event) => {
+    event.preventDefault();
+    try {
+      await inventarioService.addArticleVariants(detailProduct.articulo_id, [{ ...variantDraft, stock_inicial: parseInt(variantDraft.stock_inicial || 0) }]);
+      setVariantDraft({ sku: '', talla: '', color: '', stock_inicial: 0 });
+      setAddingVariant(false);
+      fetchData();
+      notify('Variante agregada al artículo.', 'success');
+    } catch (error) {
+      notify(error.response?.data?.detail || 'No se pudo agregar la variante.', 'error');
+    }
+  };
+
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -203,6 +225,7 @@ export default function CatalogoQRPage() {
           precio: parseFloat(formData.precio),
           descripcion: formData.descripcion,
           tamano: formData.tamano,
+          color: formData.color,
           detalles_rubro: formData.detalles_rubro,
           imagen_url: (activePhoto && !activePhoto.startsWith('file:') ? activePhoto : formData.imagen_url) || null,
           estado_id: Number(formData.estado_id || 1),
@@ -210,13 +233,17 @@ export default function CatalogoQRPage() {
           stock_actual: parseInt(formData.stock_inicial || 0),
         });
       } else {
-        savedProduct = await inventarioService.create({
-          ...formData,
+        savedProduct = await inventarioService.createArticle({
+          codigo: formData.codigo_articulo,
+          nombre: formData.nombre,
           marca_id: parseInt(formData.marca_id),
           precio: parseFloat(formData.precio),
-          estado_id: Number(formData.estado_id || 1),
-          stock_inicial: parseInt(formData.stock_inicial || 0),
           stock_critico: parseInt(formData.stock_critico || 5),
+          estado_id: Number(formData.estado_id || 1),
+          descripcion: formData.descripcion,
+          imagen_url: formData.imagen_url || null,
+          detalles_rubro: formData.detalles_rubro,
+          variantes: formData.variantes.map((variant) => ({ ...variant, stock_inicial: parseInt(variant.stock_inicial || 0) })),
         });
       }
       let photoUploadError = null;
@@ -225,7 +252,7 @@ export default function CatalogoQRPage() {
           await inventarioService.deletePhoto(productToEdit.id, imageUrl);
         }
       }
-      if (photoFiles.length) {
+      if (photoFiles.length && productToEdit) {
         try {
           const photoResult = await inventarioService.uploadPhotos(savedProduct.id, photoFiles);
           if (activePhoto.startsWith('file:')) {
@@ -233,6 +260,12 @@ export default function CatalogoQRPage() {
             const persistedUrl = photoResult.imagenes?.[photoResult.imagenes.length - photoFiles.length + photoIndex];
             if (persistedUrl) await inventarioService.update(savedProduct.id, { imagen_url: persistedUrl });
           }
+        } catch (uploadError) {
+          photoUploadError = uploadError.response?.data?.detail || uploadError.message;
+        }
+      } else if (photoFiles.length && !productToEdit && Array.isArray(savedProduct)) {
+        try {
+          if (savedProduct.length) await inventarioService.uploadPhotos(savedProduct[0].id, photoFiles);
         } catch (uploadError) {
           photoUploadError = uploadError.response?.data?.detail || uploadError.message;
         }
@@ -562,6 +595,7 @@ export default function CatalogoQRPage() {
                                 className="font-label-md text-label-md text-on-surface font-semibold group-hover:text-primary transition-colors">
                                 {prod.nombre}
                               </span>
+                              {(prod.talla || prod.color || prod.codigo_articulo) && <span className="text-[11px] text-primary">{prod.codigo_articulo ? `Artículo ${prod.codigo_articulo} · ` : ''}{[prod.talla && `Talla ${prod.talla}`, prod.color].filter(Boolean).join(' · ')}</span>}
                               <span className="text-on-surface-variant font-body-sm text-body-sm line-clamp-1">
                                 {prod.descripcion || 'Sin descripción'}
                               </span>
@@ -704,7 +738,7 @@ export default function CatalogoQRPage() {
                     <input required value={formData.nombre} onChange={(event) => setFormData({ ...formData, nombre: event.target.value })} placeholder="Nombre del producto" className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
                   </label>
                   <label className="block text-xs font-medium text-on-surface-variant">Código
-                    <input required value={formData.sku} onChange={(event) => setFormData({ ...formData, sku: event.target.value })} placeholder="Ej. TB-001" className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
+                    <input required value={productToEdit ? formData.sku : formData.codigo_articulo} onChange={(event) => setFormData(productToEdit ? { ...formData, sku: event.target.value } : { ...formData, codigo_articulo: event.target.value })} placeholder={productToEdit ? 'SKU de variante' : 'Código de artículo · Ej. CAM-001'} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
                   </label>
                   <label className="block text-xs font-medium text-on-surface-variant">Marca
                     <select required value={formData.marca_id} onChange={(event) => setFormData({ ...formData, marca_id: event.target.value, detalles_rubro: {} })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary">
@@ -715,7 +749,7 @@ export default function CatalogoQRPage() {
                     <fieldset className="rounded-lg border border-outline-variant/30 p-3">
                       <legend className="px-1 text-xs font-semibold text-on-surface-variant">Detalles · {selectedBrand.categoria}</legend>
                       <div className="grid grid-cols-2 gap-3">
-                        {categoryFields.map(([key, label]) => {
+                        {categoryFields.filter(([key]) => (productToEdit && !productToEdit.articulo_id) || (key !== 'talla' && key !== 'tamano' && key !== 'color')).map(([key, label]) => {
                           const isSizeField = key === 'talla' || key === 'tamano';
                           return (
                             <label key={key} className="block text-xs font-medium text-on-surface-variant">{label}
@@ -728,19 +762,33 @@ export default function CatalogoQRPage() {
                       </div>
                     </fieldset>
                   )}
+                  {productToEdit?.articulo_id && <div className="grid grid-cols-2 gap-3">
+                    <label className="block text-xs font-medium text-on-surface-variant">Talla<input value={formData.tamano} onChange={(event) => setFormData({ ...formData, tamano: event.target.value })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm" /></label>
+                    <label className="block text-xs font-medium text-on-surface-variant">Color<input value={formData.color} onChange={(event) => setFormData({ ...formData, color: event.target.value })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm" /></label>
+                  </div>}
+                  {!productToEdit && <fieldset className="space-y-3 rounded-lg border border-outline-variant/30 p-3">
+                    <div className="flex items-center justify-between"><legend className="text-xs font-semibold text-on-surface-variant">Variantes · talla y color</legend><button type="button" onClick={() => setFormData((current) => ({ ...current, variantes: [...current.variantes, { sku: '', talla: '', color: '', stock_inicial: 0 }] }))} className="text-xs font-semibold text-primary">Agregar variante</button></div>
+                    {formData.variantes.map((variant, index) => <div key={index} className="grid grid-cols-2 gap-2 rounded-lg bg-white/50 p-2 sm:grid-cols-4">
+                      <label className="text-[11px] text-on-surface-variant">SKU<input required value={variant.sku} onChange={(event) => setFormData((current) => ({ ...current, variantes: current.variantes.map((item, i) => i === index ? { ...item, sku: event.target.value } : item) }))} className="mt-1 w-full rounded border border-outline-variant/30 px-2 py-2 text-sm" /></label>
+                      <label className="text-[11px] text-on-surface-variant">Talla<input value={variant.talla} onChange={(event) => setFormData((current) => ({ ...current, variantes: current.variantes.map((item, i) => i === index ? { ...item, talla: event.target.value } : item) }))} className="mt-1 w-full rounded border border-outline-variant/30 px-2 py-2 text-sm" /></label>
+                      <label className="text-[11px] text-on-surface-variant">Color<input value={variant.color} onChange={(event) => setFormData((current) => ({ ...current, variantes: current.variantes.map((item, i) => i === index ? { ...item, color: event.target.value } : item) }))} className="mt-1 w-full rounded border border-outline-variant/30 px-2 py-2 text-sm" /></label>
+                      <label className="text-[11px] text-on-surface-variant">Stock<input type="number" min="0" value={variant.stock_inicial} onChange={(event) => setFormData((current) => ({ ...current, variantes: current.variantes.map((item, i) => i === index ? { ...item, stock_inicial: event.target.value } : item) }))} className="mt-1 w-full rounded border border-outline-variant/30 px-2 py-2 text-sm" /></label>
+                      {formData.variantes.length > 1 && <button type="button" onClick={() => setFormData((current) => ({ ...current, variantes: current.variantes.filter((_, i) => i !== index) }))} className="col-span-2 justify-self-end text-xs text-error sm:col-span-4">Quitar variante</button>}
+                    </div>)}
+                  </fieldset>}
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-xs font-medium text-on-surface-variant">Precio de venta (C$)
                       <input required type="number" min="0.01" step="0.01" value={formData.precio} onChange={(event) => setFormData({ ...formData, precio: event.target.value })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
                     </label>
-                    <label className="block text-xs font-medium text-on-surface-variant">{productToEdit ? 'Stock' : 'Stock inicial'}
+                    {productToEdit && <label className="block text-xs font-medium text-on-surface-variant">Stock
                       <input type="number" min="0" value={formData.stock_inicial} onChange={(event) => setFormData({ ...formData, stock_inicial: event.target.value })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
-                    </label>
+                    </label>}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-xs font-medium text-on-surface-variant">Stock cr?tico
                       <input type="number" min="0" value={formData.stock_critico} onChange={(event) => setFormData({ ...formData, stock_critico: event.target.value })} className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
                     </label>
-                    {!categoryHasSizeField && <label className="block text-xs font-medium text-on-surface-variant">Talla / tamaño / variante
+                    {productToEdit && !productToEdit.articulo_id && !categoryHasSizeField && <label className="block text-xs font-medium text-on-surface-variant">Talla / tamaño / variante
                       <input value={formData.tamano} onChange={(event) => setFormData({ ...formData, tamano: event.target.value })} placeholder="Opcional" className="mt-1 w-full rounded-lg border border-outline-variant/30 bg-white/70 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
                     </label>}
                   </div>
@@ -776,6 +824,7 @@ export default function CatalogoQRPage() {
                   <span className="font-mono text-xs text-primary font-bold">SKU: {detailProduct.sku}</span>
                 </div>
               </div>
+              {detailProduct.articulo_id && <button type="button" onClick={() => setAddingVariant((open) => !open)} className="rounded-lg px-3 py-2 text-xs font-semibold text-primary hover:bg-primary-fixed/30">Agregar variante</button>}
               <button
                 onClick={() => setDetailProduct(null)}
                 className="text-on-surface-variant hover:text-error p-1 rounded-lg hover:bg-surface-container transition-colors"
@@ -784,6 +833,13 @@ export default function CatalogoQRPage() {
               </button>
             </div>
 
+            {addingVariant && detailProduct.articulo_id && <form onSubmit={handleAddVariant} className="grid grid-cols-2 gap-2 rounded-xl bg-surface-container-low p-3 sm:grid-cols-4">
+              <input required placeholder="SKU" value={variantDraft.sku} onChange={(event) => setVariantDraft({ ...variantDraft, sku: event.target.value })} className="rounded-lg border border-outline-variant/40 px-2 py-2 text-sm" />
+              <input placeholder="Talla" value={variantDraft.talla} onChange={(event) => setVariantDraft({ ...variantDraft, talla: event.target.value })} className="rounded-lg border border-outline-variant/40 px-2 py-2 text-sm" />
+              <input placeholder="Color" value={variantDraft.color} onChange={(event) => setVariantDraft({ ...variantDraft, color: event.target.value })} className="rounded-lg border border-outline-variant/40 px-2 py-2 text-sm" />
+              <input type="number" min="0" placeholder="Stock" value={variantDraft.stock_inicial} onChange={(event) => setVariantDraft({ ...variantDraft, stock_inicial: event.target.value })} className="rounded-lg border border-outline-variant/40 px-2 py-2 text-sm" />
+              <button type="submit" className="col-span-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-on-primary sm:col-span-4">Guardar variante</button>
+            </form>}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
               {/* Columna Izquierda: QR y Acciones */}
               <div className="flex flex-col items-center justify-center p-4 bg-white rounded-xl border border-slate-200 gap-3">

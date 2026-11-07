@@ -10,6 +10,7 @@ class ProductoBase(BaseModel):
     precio: float = Field(gt=0, le=9999999999.99)
     descripcion: Optional[str] = Field(default=None, max_length=10000)
     tamano: Optional[str] = Field(default=None, max_length=255)
+    color: Optional[str] = Field(default=None, max_length=100)
     stock_critico: Optional[int] = Field(default=5, ge=0, le=2147483647)
     imagen_url: Optional[str] = Field(default=None, max_length=2000)
     imagenes: List[str] = Field(default_factory=list, max_length=10)
@@ -19,6 +20,27 @@ class ProductoBase(BaseModel):
 class ProductoCreate(ProductoBase):
     stock_inicial: Optional[int] = Field(default=0, ge=0, le=2147483647)
 
+
+class VarianteCreate(BaseModel):
+    sku: str = Field(min_length=1, max_length=100)
+    talla: Optional[str] = Field(default=None, max_length=255)
+    color: Optional[str] = Field(default=None, max_length=100)
+    stock_inicial: int = Field(default=0, ge=0, le=2147483647)
+
+
+class ArticuloCreate(BaseModel):
+    codigo: str = Field(min_length=1, max_length=100)
+    nombre: str = Field(min_length=1, max_length=255)
+    marca_id: int = Field(gt=0)
+    precio: float = Field(gt=0, le=9999999999.99)
+    descripcion: Optional[str] = Field(default=None, max_length=10000)
+    stock_critico: int = Field(default=5, ge=0, le=2147483647)
+    imagen_url: Optional[str] = Field(default=None, max_length=2000)
+    imagenes: List[str] = Field(default_factory=list, max_length=10)
+    detalles_rubro: Dict[str, str] = Field(default_factory=dict)
+    estado_id: int = 1
+    variantes: List[VarianteCreate] = Field(min_length=1, max_length=200)
+
 class ProductoUpdate(BaseModel):
     sku: Optional[str] = Field(default=None, min_length=1, max_length=100)
     nombre: Optional[str] = Field(default=None, min_length=1, max_length=255)
@@ -26,6 +48,7 @@ class ProductoUpdate(BaseModel):
     precio: Optional[float] = Field(default=None, gt=0, le=9999999999.99)
     descripcion: Optional[str] = Field(default=None, max_length=10000)
     tamano: Optional[str] = Field(default=None, max_length=255)
+    color: Optional[str] = Field(default=None, max_length=100)
     stock_critico: Optional[int] = Field(default=None, ge=0, le=2147483647)
     imagen_url: Optional[str] = Field(default=None, max_length=2000)
     imagenes: Optional[List[str]] = Field(default=None, max_length=10)
@@ -53,6 +76,10 @@ class ProductoResponse(BaseModel):
     marca_codigo: Optional[str] = None
     stock_actual: int = 0
     qr_status: str = "Generado"
+    articulo_id: Optional[int] = None
+    codigo_articulo: Optional[str] = None
+    talla: Optional[str] = None
+    color: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -167,7 +167,7 @@ class POSService:
                 lines.append({
                     "producto_id": product.id,
                     "sku": product.sku or "",
-                    "nombre": product.nombre,
+                    "nombre": " ".join((product.nombre, f"(Talla {product.tamano})" if product.tamano else "", f"({product.color})" if product.color else "")).strip(),
                     "cantidad": quantity,
                     "precio_unitario": unit_price,
                     "subtotal": line_total,
