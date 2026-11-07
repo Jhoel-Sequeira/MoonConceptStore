@@ -31,7 +31,7 @@ def export_qr_word(product_ids: List[int] = Body(...), db: Session = Depends(get
     if len(by_id) != len(set(product_ids)):
         raise HTTPException(status_code=404, detail="Uno o más productos ya no existen")
 
-    document_parts = []
+    document_rows = []
     relationships = []
     images = []
     for index, product_id in enumerate(dict.fromkeys(product_ids), start=1):
@@ -44,16 +44,31 @@ def export_qr_word(product_ids: List[int] = Body(...), db: Session = Depends(get
         relationships.append(
             f'<Relationship Id="{rel_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/qr{index}.png"/>'
         )
-        document_parts.append(
-            f'<w:p><w:r><w:drawing><wp:inline><wp:extent cx="2743200" cy="2194560"/><wp:effectExtent l="0" t="0" r="0" b="0"/>'
+        cell = (
+            f'<w:tc><w:tcPr><w:tcW w:w="5400" w:type="dxa"/></w:tcPr>'
+            f'<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline><wp:extent cx="2468880" cy="1975104"/><wp:effectExtent l="0" t="0" r="0" b="0"/>'
             f'<wp:docPr id="{index}" name="QR {escape(product.sku or str(product.id))}"/>'
             f'<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
             f'<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
             f'<pic:pic><pic:nvPicPr><pic:cNvPr id="{index}" name="QR {escape(product.sku or str(product.id))}.png"/><pic:cNvPicPr/></pic:nvPicPr>'
             f'<pic:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
-            f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="2743200" cy="2194560"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
-            f'</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
+            f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="2468880" cy="1975104"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+            f'</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p></w:tc>'
         )
+        if index % 2:
+            document_rows.append([cell])
+        else:
+            document_rows[-1].append(cell)
+
+    if len(document_rows[-1]) == 1:
+        document_rows[-1].append('<w:tc><w:tcPr><w:tcW w:w="5400" w:type="dxa"/></w:tcPr><w:p/></w:tc>')
+    table = (
+        '<w:tbl><w:tblPr><w:tblW w:w="10800" w:type="dxa"/><w:tblLayout w:type="fixed"/>'
+        '<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders></w:tblPr>'
+        '<w:tblGrid><w:gridCol w:w="5400"/><w:gridCol w:w="5400"/></w:tblGrid>'
+        + ''.join('<w:tr>' + ''.join(row) + '</w:tr>' for row in document_rows)
+        + '</w:tbl>'
+    )
 
     xml_document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -62,7 +77,7 @@ def export_qr_word(product_ids: List[int] = Body(...), db: Session = Depends(get
         'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
         'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
         'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>'
-        + ''.join(document_parts)
+        + table
         + '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/></w:sectPr></w:body></w:document>'
     )
     output = BytesIO()
