@@ -326,7 +326,7 @@ class InventarioService:
         card = Image.new("RGB", (width, height), "white")
         draw = ImageDraw.Draw(card)
         draw.rounded_rectangle((48, 30, width - 48, height - 30), radius=28, fill="white", outline="#d2d2d2", width=4)
-        qr_image.thumbnail((450, 450))
+        qr_image = qr_image.resize((450, 450), Image.Resampling.NEAREST)
         center_x = width // 2
         card.paste(qr_image, ((width - qr_image.width) // 2, 38))
 
