@@ -19,15 +19,14 @@ from openpyxl.formatting.rule import FormulaRule
 from openpyxl.drawing.image import Image as OpenpyxlImage
 from PIL import Image as PILImage
 from app.models.marcas import Marca, Cuenta
-from app.models.inventario import Articulo, Kardex, Producto
+from app.models.inventario import Kardex, Producto
 from app.models.ingresos import Ingreso, IngresoDetalle
 from app.schemas.marcas import MarcaCreate, MarcaUpdate
 from app.core.storage import delete_image, download_image, upload_image
 from app.core.categories import CATEGORY_FIELDS, PRODUCT_CATEGORIES, normalize_category, validate_category_details
 from app.services.inventario_service import InventarioService
 
-DELIVERY_TEMPLATE_VERSION = 8
-ARTICLE_CODE_HEADER = "CODIGO DE ARTICULO (VARIANTES)"
+DELIVERY_TEMPLATE_VERSION = 7
 DELIVERY_BASE_HEADERS = (
     "#", "SKU / CÓDIGO *", "NOMBRE * SI ES NUEVO", "DESCRIPCIÓN",
     "PRECIO VENTA C$ * SI ES NUEVO", "CANTIDAD RECIBIDA *",
@@ -357,10 +356,10 @@ class MarcasService:
         if compact_template:
             description_header, quantity_header, category_fields = rubric_layout
             headers = ["#", "SKU / CÓDIGO *", description_header, "PRECIO VENTA C$", quantity_header,
-                       *(label for _, label in category_fields), ARTICLE_CODE_HEADER]
+                       *(label for _, label in category_fields)]
         else:
             category_fields = CATEGORY_FIELDS.get(category, ())
-            headers = [*DELIVERY_BASE_HEADERS, *(label.upper() for _, label in category_fields), ARTICLE_CODE_HEADER]
+            headers = [*DELIVERY_BASE_HEADERS, *(label.upper() for _, label in category_fields)]
         category_start_col = 6 if compact_template else len(DELIVERY_BASE_HEADERS) + 1
         last_col = len(headers)
 
@@ -574,7 +573,6 @@ class MarcasService:
             ("Resultado", "El sistema valida todo el archivo antes de guardar. Los SKU existentes de esta marca reciben más stock; los nuevos se crean. Si un SKU pertenece a otra marca o hay datos inválidos, no se aplica la carga."),
             ("Campos automáticos", "La marca, el identificador, el código QR y el estado activo los asigna el sistema. No hace falta escribirlos en esta plantilla."),
         ]
-        guide_data.insert(-2, ("Codigo de articulo", "Repite el mismo codigo en las filas de sus tallas/colores. Cada variante conserva SKU y stock propios. Dejalo vacio para un producto independiente."))
         for r, (label, desc) in enumerate(guide_data, start=4):
             guide.row_dimensions[r].height = 42
             a, b = guide.cell(r, 2, label), guide.cell(r, 3, desc)
@@ -629,8 +627,7 @@ class MarcasService:
             raise ValueError("La plantilla no corresponde al formato de importación de productos")
         meta = wb["_plantilla"]
         template_brand_id = meta["B1"].value if meta["A1"].value == "marca_id" else None
-        template_version = meta["B3"].value
-        if meta["A1"].value != "marca_id" or template_version not in (7, DELIVERY_TEMPLATE_VERSION):
+        if meta["A1"].value != "marca_id" or meta["B3"].value != DELIVERY_TEMPLATE_VERSION:
             raise ValueError("La plantilla no tiene una versión compatible. Descarga una plantilla nueva.")
         if template_brand_id not in (None, "") and str(template_brand_id) != str(marca.id):
             raise ValueError("La plantilla pertenece a otra marca. Descarga la plantilla de la marca seleccionada.")
@@ -648,19 +645,12 @@ class MarcasService:
             description_header, quantity_header, compact_fields = rubric_layout
             compact_expected = ["#", "SKU / CÓDIGO *", description_header, "PRECIO VENTA C$", quantity_header,
                                 *(label for _, label in compact_fields)]
-            if template_version >= 8:
-                compact_expected.append(ARTICLE_CODE_HEADER)
             compact_actual = [ws.cell(10, col).value for col in range(1, len(compact_expected) + 1)]
             compact_template = all(
                 _normalize_template_header(actual) == _normalize_template_header(expected)
                 for actual, expected in zip(compact_actual, compact_expected)
             )
-            if template_version >= 8 and not compact_template:
-                raise ValueError("La plantilla compacta no contiene su encabezado de código de artículo. Descarga una nueva.")
         category_fields = canonical_fields
-        article_code_column = len(DELIVERY_BASE_HEADERS) + len(category_fields) + 1
-        if template_version >= 8 and not compact_template and _normalize_template_header(ws.cell(10, article_code_column).value) != _normalize_template_header(ARTICLE_CODE_HEADER):
-            raise ValueError("La plantilla no contiene el encabezado de código de artículo. Descarga una nueva.")
         template_category = _normalize_template_header(meta["B6"].value)
         expected_category = _normalize_template_header(category)
         if template_category != expected_category or (not compact_template and canonical_headers != [label.upper() for _, label in canonical_fields]):
@@ -735,10 +725,8 @@ class MarcasService:
 
         compact_fields = rubric_layout[2] if rubric_layout else ()
         compact_details = None
-        has_article_code = template_version >= 8
-        max_product_col = (5 + len(compact_fields) if compact_template else len(DELIVERY_BASE_HEADERS) + len(category_fields)) + int(has_article_code)
+        max_product_col = 5 + len(compact_fields) if compact_template else len(DELIVERY_BASE_HEADERS) + len(category_fields)
         for row_num, values in enumerate(ws.iter_rows(min_row=data_start, max_row=data_end, min_col=1, max_col=max_product_col, values_only=True), start=data_start):
-            article_code = str(values[-1]).strip().upper() if has_article_code and values[-1] is not None and str(values[-1]).strip() else None
             compact_details = None
             if compact_template:
                 compact_details = {
@@ -777,15 +765,12 @@ class MarcasService:
             size_value = details.pop("talla", None)
             if size_value is None:
                 size_value = details.pop("tamano", None)
-            variant_color = details.get("color")
             rows.append({
                 "row_num": row_num,
-                "codigo_articulo": article_code,
                 "sku": sku,
                 "nombre": name,
                 "descripcion": str(values[3]).strip() if values[3] is not None and str(values[3]).strip() else None,
                 "tamano": size_value,
-                "color": variant_color,
                 "precio": price,
                 "stock_inicial": int(quantity_decimal),
                 "imagen_url": None,
@@ -795,44 +780,8 @@ class MarcasService:
         if not rows:
             raise ValueError("No hay productos para importar")
 
-        article_groups = {}
-        for item in rows:
-            code = item["codigo_articulo"]
-            if code:
-                if len(code) > 100:
-                    raise ValueError(f"El código de artículo de la fila {item['row_num']} supera los 100 caracteres")
-                article_groups.setdefault(code, []).append(item)
-
         # Bloquear productos existentes evita que dos recepciones simultáneas
         # pierdan unidades al actualizar el kardex.
-        for code, group in article_groups.items():
-            combinations = [((item["tamano"] or "").casefold(), (item["color"] or "").casefold()) for item in group]
-            if len(set(combinations)) != len(combinations):
-                raise ValueError(f"El artículo {code} repite una combinación de talla y color")
-            if sum(bool(item["imagen_incrustada"]) for item in group) > 1:
-                raise ValueError(f"Incluye una sola imagen compartida para el artículo {code}")
-            names = {item["nombre"] for item in group if item["nombre"]}
-            prices = {item["precio"] for item in group if item["precio"] is not None}
-            descriptions = {item["descripcion"] for item in group if item["descripcion"]}
-            if len(names) > 1 or len(prices) > 1 or len(descriptions) > 1:
-                raise ValueError(f"Las filas del artículo {code} deben repetir los mismos datos generales")
-            shared_details = {}
-            for item in group:
-                for key, value in item["detalles_rubro"].items():
-                    if key == "color":
-                        continue
-                    if key in shared_details and shared_details[key] != value:
-                        raise ValueError(f"Las filas del artículo {code} tienen valores distintos en {key}")
-                    shared_details[key] = value
-            common_name = next(iter(names), None)
-            common_price = next(iter(prices), None)
-            common_description = next(iter(descriptions), None)
-            for item in group:
-                item["nombre"] = item["nombre"] or common_name
-                item["precio"] = item["precio"] if item["precio"] is not None else common_price
-                item["descripcion"] = item["descripcion"] or common_description
-                item["detalles_articulo"] = shared_details
-
         existing_products = {
             (product.sku or "").upper(): product
             for product in db.query(Producto)
@@ -840,55 +789,8 @@ class MarcasService:
             .with_for_update()
             .all()
         }
-        existing_articles = {
-            article.codigo.upper(): article
-            for article in db.query(Articulo)
-            .filter(func.upper(Articulo.codigo).in_(list(article_groups)))
-            .with_for_update()
-            .all()
-        } if article_groups else {}
-        for code, group in article_groups.items():
-            article = existing_articles.get(code)
-            if article:
-                if article.marca_id != marca_id:
-                    raise ValueError(f"El artículo {code} pertenece a otra marca")
-                existing_combinations = {
-                    ((variant.tamano or "").casefold(), (variant.color or "").casefold())
-                    for variant in article.variantes
-                }
-                for item in group:
-                    if item["nombre"] and item["nombre"] != article.nombre:
-                        raise ValueError(f"El nombre del artículo {code} no coincide con el registrado")
-                    if item["precio"] is not None and item["precio"] != article.precio:
-                        raise ValueError(f"El precio del artículo {code} no coincide con el registrado")
-                    if item["descripcion"] and item["descripcion"] != article.descripcion:
-                        raise ValueError(f"La descripción del artículo {code} no coincide con la registrada")
-                    item["nombre"], item["precio"] = article.nombre, article.precio
-                    item["descripcion"] = article.descripcion
-                    item["detalles_articulo"] = article.detalles_rubro or {}
-                    product = existing_products.get(item["sku"])
-                    combo = ((item["tamano"] or "").casefold(), (item["color"] or "").casefold())
-                    if product and product.articulo_id != article.id:
-                        raise ValueError(f"El SKU {item['sku']} ya está registrado fuera del artículo {code}")
-                    if not product and combo in existing_combinations:
-                        raise ValueError(f"El artículo {code} ya tiene la combinación de talla y color de la fila {item['row_num']}")
-            else:
-                for item in group:
-                    if not item["nombre"]:
-                        raise ValueError(f"La fila {item['row_num']} necesita el nombre para crear el artículo {code}")
-                    if item["precio"] is None:
-                        raise ValueError(f"La fila {item['row_num']} necesita el precio para crear el artículo {code}")
         for item in rows:
             product = existing_products.get(item["sku"])
-            code = item["codigo_articulo"]
-            if code:
-                article = existing_articles.get(code)
-                if product and (not article or product.articulo_id != article.id):
-                    raise ValueError(f"El SKU {item['sku']} ya existe fuera del artículo {code}")
-                if product and item["tamano"] and product.tamano != item["tamano"]:
-                    raise ValueError(f"La talla del SKU {item['sku']} no coincide con el artículo registrado")
-                if product and item["color"] and product.color != item["color"]:
-                    raise ValueError(f"El color del SKU {item['sku']} no coincide con el artículo registrado")
             if product and product.marca_id != marca_id:
                 raise ValueError(
                     f"El SKU {item['sku']} pertenece a otra marca (fila {item['row_num']})."
@@ -912,30 +814,6 @@ class MarcasService:
             db.add(ingreso)
             db.flush()
 
-            article_by_code = dict(existing_articles)
-            for code, group in article_groups.items():
-                if code in article_by_code:
-                    continue
-                first = group[0]
-                embedded_image_url = None
-                image_item = next((item for item in group if item["imagen_incrustada"]), None)
-                if image_item:
-                    content, extension, content_type = embedded_by_row[image_item["row_num"]]
-                    embedded_image_url = upload_image(
-                        f"moonconcept/articulos/{marca_id}/{code}", f"{code}{extension}", content, content_type,
-                    )
-                    uploaded_image_urls.append(embedded_image_url)
-                image_urls = [embedded_image_url] if embedded_image_url else []
-                article = Articulo(
-                    codigo=code, marca_id=marca_id, categoria=category,
-                    detalles_rubro=first["detalles_articulo"], nombre=first["nombre"],
-                    descripcion=first["descripcion"], precio=first["precio"], stock_critico=5,
-                    imagen_url=embedded_image_url, imagenes=image_urls, estado_id=1,
-                )
-                db.add(article)
-                db.flush()
-                article_by_code[code] = article
-
             productos_procesados = []
             productos_creados = 0
             productos_actualizados = 0
@@ -945,33 +823,30 @@ class MarcasService:
                     productos_actualizados += 1
                 else:
                     embedded_image_url = None
-                    article = article_by_code.get(item["codigo_articulo"])
-                    if not article and item["imagen_incrustada"]:
+                    if item["imagen_incrustada"]:
                         content, extension, content_type = embedded_by_row[item["row_num"]]
                         embedded_image_url = upload_image(
                             f"moonconcept/productos/{marca_id}/{item['sku']}",
                             f"{item['sku']}{extension}", content, content_type,
                         )
                         uploaded_image_urls.append(embedded_image_url)
-                    if article:
-                        producto = Producto(
-                            articulo_id=article.id, marca_id=marca_id, categoria=category,
-                            detalles_rubro=article.detalles_rubro, sku=item["sku"],
-                            nombre=article.nombre, descripcion=article.descripcion,
-                            tamano=item["tamano"], color=item["color"], precio=article.precio,
-                            stock_inicial=0, stock_critico=article.stock_critico,
-                            imagen_url=article.imagen_url, imagenes=article.imagenes,
-                            estado_id=article.estado_id, codigo_qr=f"BHPOS-{item['sku']}",
-                        )
-                    else:
-                        image_urls = list(dict.fromkeys(url for url in (item["imagen_url"], embedded_image_url) if url))
-                        producto = Producto(
-                            marca_id=marca_id, categoria=category, detalles_rubro=item["detalles_rubro"],
-                            sku=item["sku"], nombre=item["nombre"], descripcion=item["descripcion"],
-                            tamano=item["tamano"], color=item["color"], precio=item["precio"], stock_inicial=0,
-                            stock_critico=5, imagen_url=item["imagen_url"] or embedded_image_url,
-                            imagenes=image_urls, estado_id=1, codigo_qr=f"BHPOS-{item['sku']}",
-                        )
+                    image_urls = list(dict.fromkeys(url for url in (item["imagen_url"], embedded_image_url) if url))
+                    producto = Producto(
+                        marca_id=marca_id,
+                        categoria=category,
+                        detalles_rubro=item["detalles_rubro"],
+                        sku=item["sku"],
+                        nombre=item["nombre"],
+                        descripcion=item["descripcion"],
+                        tamano=item["tamano"],
+                        precio=item["precio"],
+                        stock_inicial=0,
+                        stock_critico=5,
+                        imagen_url=item["imagen_url"] or embedded_image_url,
+                        imagenes=image_urls,
+                        estado_id=1,
+                        codigo_qr=f"BHPOS-{item['sku']}",
+                    )
                     db.add(producto)
                     productos_creados += 1
                 productos_procesados.append((producto, item))
@@ -1027,7 +902,7 @@ class MarcasService:
                 left, top = column * cell_width, row * cell_height
                 label_content = InventarioService.generate_qr_image(
                     producto.codigo_qr or f"BHPOS-{producto.sku}",
-                    " ".join((producto.sku, f"Talla {producto.tamano}" if producto.tamano else "", producto.color or "")).strip(),
+                    producto.sku,
                     producto.precio,
                 )
                 with PILImage.open(label_content) as label:

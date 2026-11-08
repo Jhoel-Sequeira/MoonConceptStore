@@ -171,9 +171,6 @@ export default function POSPage() {
       normalizeSearch(sku).includes(normalizedSearch) ||
       normalizeSearch(marca).includes(normalizedSearch) ||
       normalizeSearch(p.codigo_qr).includes(normalizedSearch) ||
-      normalizeSearch(p.codigo_articulo).includes(normalizedSearch) ||
-      normalizeSearch(p.talla).includes(normalizedSearch) ||
-      normalizeSearch(p.color).includes(normalizedSearch) ||
       normalizeSearch(p.descripcion).includes(normalizedSearch);
 
     return matchesCat && matchesSearch;
@@ -202,7 +199,6 @@ export default function POSPage() {
           id: product.id,
           sku: product.sku,
           nombre: product.nombre,
-          variante: [product.talla && `Talla ${product.talla}`, product.color].filter(Boolean).join(' · '),
           marca: product.marca_nombre || product.marca?.nombre_marca || 'General',
           precio: parseFloat(product.precio) || 0,
           stockMax: stockDisponible,
@@ -502,8 +498,6 @@ export default function POSPage() {
                         </span>
                         <h4 className="font-semibold text-xs text-on-surface line-clamp-1">{p.nombre}</h4>
                         <span className="text-[11px] font-mono text-on-surface-variant">{p.sku}</span>
-                        {p.codigo_articulo && <span className="text-[10px] text-primary">Artículo {p.codigo_articulo}</span>}
-                        {(p.talla || p.color) && <span className="text-[10px] text-on-surface-variant">{[p.talla && `Talla ${p.talla}`, p.color].filter(Boolean).join(' · ')}</span>}
                       </div>
                     </div>
                     <div className="flex items-center justify-between mt-3 pt-2 border-t border-surface-container-low">
@@ -580,7 +574,6 @@ export default function POSPage() {
                     <div className="flex flex-col min-w-0 flex-1">
                       <span className="text-[11px] font-semibold text-primary">{item.marca}</span>
                       <span className="font-semibold text-xs text-on-surface truncate">{item.nombre}</span>
-                      {item.variante && <span className="text-[10px] text-on-surface-variant">{item.variante}</span>}
                       <span className="text-[11px] text-on-surface-variant font-mono">
                         {formatCordobas(item.precio)} c/u
                       </span>

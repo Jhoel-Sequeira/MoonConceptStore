@@ -8,8 +8,6 @@ class Producto(Base):
     __tablename__ = "productos"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    articulo_id = Column(Integer, ForeignKey("articulos.id", ondelete="CASCADE"), nullable=True, index=True)
-    color = Column(String(100), nullable=True)
     marca_id = Column(Integer, ForeignKey("marcas.id"), nullable=False)
     categoria = Column(String(100), nullable=False, server_default=text("'ROPA VARIADA'"))
     detalles_rubro = Column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
@@ -27,26 +25,6 @@ class Producto(Base):
     estado_id = Column(Integer, nullable=False, default=1)
 
     marca = relationship("Marca", backref="productos")
-    articulo = relationship("Articulo", back_populates="variantes")
-
-
-class Articulo(Base):
-    __tablename__ = "articulos"
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    codigo = Column(String(100), nullable=False, unique=True, index=True)
-    marca_id = Column(Integer, ForeignKey("marcas.id"), nullable=False)
-    categoria = Column(String(100), nullable=False)
-    detalles_rubro = Column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
-    nombre = Column(String(255), nullable=False)
-    descripcion = Column(Text, nullable=True)
-    precio = Column(Numeric(12, 2), nullable=False)
-    stock_critico = Column(Integer, nullable=False, default=5, server_default=text("5"))
-    imagen_url = Column(Text, nullable=True)
-    imagenes = Column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
-    estado_id = Column(Integer, nullable=False, default=1, server_default=text("1"))
-
-    variantes = relationship("Producto", back_populates="articulo")
 
 class Kardex(Base):
     __tablename__ = "kardex"

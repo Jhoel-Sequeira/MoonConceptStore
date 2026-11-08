@@ -23,16 +23,6 @@ export const inventarioService = {
     return response.data;
   },
 
-  createArticle: async (articleData) => {
-    const response = await api.post('/inventario/articulos', articleData);
-    return response.data;
-  },
-
-  addArticleVariants: async (articleId, variants) => {
-    const response = await api.post(`/inventario/articulos/${articleId}/variantes`, variants);
-    return response.data;
-  },
-
   update: async (id, productoData) => {
     const response = await api.put(`/inventario/${id}`, productoData);
     return response.data;
