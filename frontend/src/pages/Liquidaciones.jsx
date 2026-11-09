@@ -23,7 +23,7 @@ function buildBrandStatementHtml(brand, period, settlement, productRows, metadat
     <td class="number">${index + 1}</td><td>${escapeHtml(item.sku || '—')}</td><td><strong>${escapeHtml(item.producto)}</strong></td><td class="number">${escapeHtml(item.cantidad)}</td>
     <td class="number">${money(item.bruto)}</td><td class="number">${money(item.metodos.efectivo)}</td>
     <td class="number">${money(item.metodos.tarjeta)}</td><td class="number">${money(item.metodos.transferencia)}</td>
-    <td class="number">${money(item.comision_pos)}</td><td class="number">${money(item.comision_tienda)}</td>
+    <td class="number">${money(item.comision_pos)}</td>
     <td class="number net">${money(item.neto_marca)}</td>
   </tr>`).join('');
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Liquidación ${escapeHtml(brand.marca)} ${escapeHtml(period)}</title>
@@ -41,9 +41,9 @@ function buildBrandStatementHtml(brand, period, settlement, productRows, metadat
     <header class="hero"><div><div class="eyebrow">Moon Concept Store · Colectivo</div><h1>${escapeHtml(brand.marca)}</h1><p>Estado de cuenta mensual de ventas</p></div><div class="period"><span>Período liquidado</span><strong>${escapeHtml(period)}</strong></div></header>
     <section class="brand-data"><div><span class="label">Marca</span><span>${escapeHtml(brand.marca)}</span></div><div><span class="label">Código</span><span>${escapeHtml(metadata.codigo || '—')}</span></div><div><span class="label">Categoría</span><span>${escapeHtml(metadata.categoria || 'General')}</span></div><div><span class="label">Representante</span><span>${escapeHtml(metadata.nombre_representante || '—')}</span></div><div><span class="label">Correo</span><span>${escapeHtml(metadata.email || '—')}</span></div><div><span class="label">Teléfono</span><span>${escapeHtml(metadata.telefono || '—')}</span></div></section>
     <div class="statusbar"><div><div class="label">Estado de liquidación</div><div class="status-text">${escapeHtml(paymentInfo)}</div></div><span class="status">${escapeHtml(status)}</span></div>
-    <section class="cards"><article class="card"><small>Ventas brutas</small><strong>${money(brand.ventas_brutas)}</strong></article><article class="card"><small>Comisión de tienda · 20%</small><strong>${money(brand.comision_tienda)}</strong></article><article class="card net"><small>Neto para la marca</small><strong>${money(brand.neto_pagar)}</strong></article><article class="card"><small>Comisión terminal POS · a cargo de la marca</small><strong>${money(brand.comision_pos)}</strong></article></section>
+    <section class="cards"><article class="card"><small>Ventas brutas</small><strong>${money(brand.ventas_brutas)}</strong></article><article class="card net"><small>Neto para la marca</small><strong>${money(brand.neto_pagar)}</strong></article><article class="card"><small>Comisión terminal POS · a cargo de la marca</small><strong>${money(brand.comision_pos)}</strong></article></section>
     <div class="section-head"><div><h2>Detalle de productos</h2><p>Unidades vendidas: ${escapeHtml(brand.cantidad)}</p></div><p>Montos en córdobas</p></div>
-    <table><thead><tr><th class="number">#</th><th>SKU / código</th><th>Producto</th><th class="number">Unidades</th><th class="number">Bruto</th><th class="number">Efectivo</th><th class="number">Tarjeta</th><th class="number">Transferencia</th><th class="number">POS</th><th class="number">Tienda 20%</th><th class="number">Neto marca</th></tr></thead><tbody>${productTable || '<tr><td colspan="11">No hay detalle de productos en este período.</td></tr>'}</tbody></table>
+    <table><thead><tr><th class="number">#</th><th>SKU / código</th><th>Producto</th><th class="number">Unidades</th><th class="number">Bruto</th><th class="number">Efectivo</th><th class="number">Tarjeta</th><th class="number">Transferencia</th><th class="number">POS</th><th class="number">Neto marca</th></tr></thead><tbody>${productTable || '<tr><td colspan="10">No hay detalle de productos en este período.</td></tr>'}</tbody></table>
     <footer class="foot"><span><strong>Moon Concept Store</strong><br>Reporte preparado para ${escapeHtml(brand.marca)} · ${escapeHtml(todayLocal())}</span><span>La comisión POS se deduce del neto correspondiente a la marca.</span></footer>
     </main></body></html>`;
 }
@@ -170,8 +170,8 @@ export default function LiquidacionesPage() {
 
   const exportCsv = () => {
     if (!report) return;
-    const columns = ['Marca', 'Unidades', 'Ventas brutas', 'Retención tienda 20%', 'Neto marca', 'Comisión terminal POS', 'Efectivo', 'Tarjeta', 'Transferencia', 'Estado', 'Fecha pago', 'Referencia'];
-    const values = rows.map((row) => [row.marca, row.cantidad, row.ventas_brutas, row.comision_tienda, row.neto_pagar, row.comision_pos,
+    const columns = ['Marca', 'Unidades', 'Ventas brutas', 'Neto marca', 'Comisión terminal POS', 'Efectivo', 'Tarjeta', 'Transferencia', 'Estado', 'Fecha pago', 'Referencia'];
+    const values = rows.map((row) => [row.marca, row.cantidad, row.ventas_brutas, row.neto_pagar, row.comision_pos,
       row.por_metodo.efectivo, row.por_metodo.tarjeta, row.por_metodo.transferencia,
       row.settlement?.estado || 'Sin liquidar', row.settlement?.fecha_pago || '', row.settlement?.referencia_pago || '']);
     const csv = [columns, ...values].map((line) => line.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
@@ -229,7 +229,7 @@ export default function LiquidacionesPage() {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-surface-container-lowest p-space-lg rounded-xl shadow-sm">
         <div>
           <h1 className="font-headline-md text-headline-md text-on-surface">{view === 'report' ? 'Reportes y liquidaciones' : 'Historial de ventas'}</h1>
-          <p className="text-sm text-on-surface-variant">Ventas mensuales y liquidación por marca. Retención fija de tienda: 20%.</p>
+          <p className="text-sm text-on-surface-variant">Ventas mensuales y liquidación por marca.</p>
         </div>
         {view === 'report' && <div className="flex flex-wrap gap-2">
           <label className="sr-only" htmlFor="period">Mes del reporte</label>
@@ -247,9 +247,9 @@ export default function LiquidacionesPage() {
 
       {error && <div role="alert" className="p-3 rounded-lg bg-error-container text-error text-sm">{error}</div>}
       {view === 'report' && (loading ? <SplashScreen message="Cargando reportes y liquidaciones..." /> : summary && <>
-        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {[
-            ['Ventas de productos', summary.ventas_brutas], ['Retención tienda (20%)', summary.comision_tienda],
+            ['Ventas de productos', summary.ventas_brutas],
             ['Neto de marcas, después de comisión POS', summary.neto_marcas], ['Comisión POS a cargo de las marcas', summary.comision_pos],
           ].map(([label, amount]) => <article key={label} className="bg-surface-container-lowest rounded-xl p-5 shadow-sm">
             <div className="text-xs uppercase tracking-wide text-on-surface-variant">{label}</div>
@@ -288,16 +288,16 @@ export default function LiquidacionesPage() {
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead><tr className="bg-surface-container-low text-xs uppercase text-on-surface-variant"><th className="p-3">Marca</th><th className="p-3 text-right">Unidades</th><th className="p-3 text-right">Bruto</th><th className="p-3 text-right">20% tienda</th><th className="p-3 text-right">Neto a pagar</th><th className="p-3">Estado</th><th className="p-3">Pago / referencia</th></tr></thead>
+              <thead><tr className="bg-surface-container-low text-xs uppercase text-on-surface-variant"><th className="p-3">Marca</th><th className="p-3 text-right">Unidades</th><th className="p-3 text-right">Bruto</th><th className="p-3 text-right">Neto a pagar</th><th className="p-3">Estado</th><th className="p-3">Pago / referencia</th></tr></thead>
               <tbody className="divide-y divide-surface-container-low">
                 {rows.map((row) => <tr key={row.marca_id}>
                   <td className="p-3 font-semibold">{row.marca}</td><td className="p-3 text-right">{row.cantidad}</td>
-                  <td className="p-3 text-right">{formatCordobas(row.ventas_brutas)}</td><td className="p-3 text-right">{formatCordobas(row.comision_tienda)}</td>
+                  <td className="p-3 text-right">{formatCordobas(row.ventas_brutas)}</td>
                   <td className="p-3 text-right font-bold">{formatCordobas(row.neto_pagar)}</td>
                   <td className="p-3">{row.settlement?.estado || 'Sin liquidar'}</td>
                   <td className="p-3">{row.settlement?.estado === 'Pagado' ? <span>{row.settlement.fecha_pago}<br /><small>{row.settlement.referencia_pago}</small></span> : row.settlement ? <button type="button" onClick={() => setSelected(row.settlement)} className="px-3 py-1 rounded bg-primary text-on-primary text-xs font-semibold">Registrar pago</button> : '—'}</td>
                 </tr>)}
-                {!rows.length && <tr><td colSpan="7" className="p-6 text-center text-on-surface-variant">No hay marcas con ventas en este período.</td></tr>}
+                {!rows.length && <tr><td colSpan="6" className="p-6 text-center text-on-surface-variant">No hay marcas con ventas en este período.</td></tr>}
               </tbody>
             </table>
           </div>
