@@ -2,8 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, 
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from io import BytesIO
-from zipfile import ZIP_DEFLATED, ZipFile
-from xml.sax.saxutils import escape
 from PIL import Image
 from app.core.storage import delete_image, upload_image
 from app.core.database import get_db
@@ -31,66 +29,7 @@ def export_qr_word(product_ids: List[int] = Body(...), db: Session = Depends(get
     if len(by_id) != len(set(product_ids)):
         raise HTTPException(status_code=404, detail="Uno o más productos ya no existen")
 
-    document_rows = []
-    relationships = []
-    images = []
-    for index, product_id in enumerate(dict.fromkeys(product_ids), start=1):
-        product = by_id[product_id]
-        image = InventarioService.generate_qr_image(
-            product.codigo_qr or f"BHPOS-{product.sku}", product.sku, product.precio
-        ).getvalue()
-        rel_id = f"rId{index}"
-        images.append((f"word/media/qr{index}.png", image))
-        relationships.append(
-            f'<Relationship Id="{rel_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/qr{index}.png"/>'
-        )
-        cell = (
-            f'<w:tc><w:tcPr><w:tcW w:w="2700" w:type="dxa"/></w:tcPr>'
-            f'<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline><wp:extent cx="1508760" cy="1207008"/><wp:effectExtent l="0" t="0" r="0" b="0"/>'
-            f'<wp:docPr id="{index}" name="QR {escape(product.sku or str(product.id))}"/>'
-            f'<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
-            f'<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
-            f'<pic:pic><pic:nvPicPr><pic:cNvPr id="{index}" name="QR {escape(product.sku or str(product.id))}.png"/><pic:cNvPicPr/></pic:nvPicPr>'
-            f'<pic:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
-            f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1508760" cy="1207008"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
-            f'</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p></w:tc>'
-        )
-        if index % 4 == 1:
-            document_rows.append([cell])
-        else:
-            document_rows[-1].append(cell)
-
-    while len(document_rows[-1]) < 4:
-        document_rows[-1].append('<w:tc><w:tcPr><w:tcW w:w="2700" w:type="dxa"/></w:tcPr><w:p/></w:tc>')
-    table = (
-        '<w:tbl><w:tblPr><w:tblW w:w="10800" w:type="dxa"/><w:tblLayout w:type="fixed"/>'
-        '<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders></w:tblPr>'
-        '<w:tblGrid><w:gridCol w:w="2700"/><w:gridCol w:w="2700"/><w:gridCol w:w="2700"/><w:gridCol w:w="2700"/></w:tblGrid>'
-        + ''.join('<w:tr>' + ''.join(row) + '</w:tr>' for row in document_rows)
-        + '</w:tbl>'
-    )
-
-    xml_document = (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
-        'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
-        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
-        'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>'
-        + table
-        + '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/></w:sectPr></w:body></w:document>'
-    )
-    output = BytesIO()
-    with ZipFile(output, "w", ZIP_DEFLATED) as archive:
-        archive.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
-        archive.writestr("_rels/.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
-        archive.writestr("word/_rels/document.xml.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + ''.join(relationships) + '</Relationships>')
-        archive.writestr("word/document.xml", xml_document)
-        for path, image in images:
-            archive.writestr(path, image)
-    output.seek(0)
-    return Response(content=output.getvalue(), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={"Content-Disposition": "attachment; filename=Codigos_QR.docx"})
-
+    return Response(content=InventarioService.generate_qr_word([by_id[product_id] for product_id in dict.fromkeys(product_ids)]), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={"Content-Disposition": "attachment; filename=Codigos_QR.docx"})
 @router.get("/", response_model=List[ProductoResponse])
 def get_productos(
     marca_id: Optional[int] = Query(None, description="Filtrar por ID de marca"),

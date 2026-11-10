@@ -236,15 +236,15 @@ export default function MarcasPage() {
     setIsImportingExcel(true);
     try {
       const result = await marcasService.importProductTemplate(brand.id, file);
-      const url = window.URL.createObjectURL(result.pdf);
+      const url = window.URL.createObjectURL(result.docx);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `QR_Productos_${brand.id}.pdf`;
+      link.download = `QR_Productos_${brand.id}.docx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
-      notify(`Importación completada para ${brand.nombre_marca}. Se descargó el PDF con los QR de los productos importados (${result.creados} nuevos, ${result.actualizados} actualizados, ${result.unidades} unidades).`, 'success');
+      notify(`Importación completada para ${brand.nombre_marca}. Se descargó el documento Word con los QR de los productos importados (${result.creados} nuevos, ${result.actualizados} actualizados, ${result.unidades} unidades).`, 'success');
       const refreshedBrands = await loadBrands();
       const refreshedBrand = refreshedBrands.find((item) => item.id === brand.id);
       if (refreshedBrand && selectedBrandForDetail?.id === brand.id) setSelectedBrandForDetail(refreshedBrand);

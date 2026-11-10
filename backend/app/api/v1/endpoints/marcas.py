@@ -154,11 +154,11 @@ def import_marca_products(
         result = MarcasService.import_delivery_template(
             db, marca_id, content, current_user.id, file.filename
         )
-        pdf = result.pop("qr_pdf")
-        filename = result.pop("qr_pdf_filename")
+        qr_word = result.pop("qr_word")
+        filename = result.pop("qr_word_filename")
         return StreamingResponse(
-            io.BytesIO(pdf),
-            media_type="application/pdf",
+            io.BytesIO(qr_word),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={
                 "Content-Disposition": f'attachment; filename="{filename}"',
                 "X-Productos-Creados": str(result["creados"]),

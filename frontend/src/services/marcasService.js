@@ -76,7 +76,7 @@ export const marcasService = {
         responseType: 'blob',
       });
       return {
-        pdf: response.data,
+        docx: response.data,
         creados: Number(response.headers['x-productos-creados'] || 0),
         actualizados: Number(response.headers['x-productos-actualizados'] || 0),
         unidades: Number(response.headers['x-unidades'] || 0),

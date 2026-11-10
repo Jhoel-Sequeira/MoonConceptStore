@@ -870,7 +870,7 @@ class MarcasService:
                     motivo=f"Importación de productos desde {ingreso.observaciones}",
                 ))
             db.add_all(detalles + movimientos)
-            qr_pdf = MarcasService.generate_import_qr_pdf(productos_procesados)
+            qr_word = InventarioService.generate_qr_word([producto for producto, _ in productos_procesados])
             db.commit()
         except Exception:
             db.rollback()
@@ -882,8 +882,8 @@ class MarcasService:
             "creados": productos_creados,
             "actualizados": productos_actualizados,
             "unidades": sum(item["stock_inicial"] for item in rows),
-            "qr_pdf": qr_pdf,
-            "qr_pdf_filename": f"QR_Productos_{marca.id}.pdf",
+            "qr_word": qr_word,
+            "qr_word_filename": f"QR_Productos_{marca.id}.docx",
         }
 
     @staticmethod
