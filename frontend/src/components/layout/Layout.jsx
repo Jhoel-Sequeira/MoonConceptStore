@@ -25,10 +25,10 @@ function Sidebar({ user, onLogout, open, onClose }) {
   return (
     <>
       {open && <button type="button" aria-label="Cerrar menú" onClick={onClose} className="fixed inset-0 z-40 bg-[#382E29]/35 md:hidden" />}
-      <aside style={{ backgroundColor: '#fff' }} className={`fixed inset-y-0 left-0 z-50 flex w-[238px] flex-col border-r border-stone-200 !bg-white px-3 py-5 shadow-lg transition-transform md:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside style={{ backgroundColor: '#fff' }} className={`fixed inset-y-0 left-0 z-50 flex h-dvh w-[238px] flex-col overflow-y-auto border-r border-stone-200 !bg-white px-3 py-5 shadow-lg transition-transform max-[700px]:py-3 md:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
         <div>
-          <div className="mb-7 flex flex-col items-center gap-3 px-2 text-center">
-            <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-full border border-stone-200 bg-white">
+          <div className="mb-7 flex flex-col items-center gap-3 px-2 text-center max-[700px]:mb-3 max-[700px]:gap-1.5">
+            <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-full border border-stone-200 bg-white max-[700px]:h-10 max-[700px]:w-10">
               <img src={brandConfig.logo.main} alt={`Logo de ${brandConfig.name}`} className="h-full w-full object-cover" />
             </div>
             <div className="min-w-0">
@@ -44,7 +44,7 @@ function Sidebar({ user, onLogout, open, onClose }) {
                 to={item.path}
                 end={item.path === '/'}
                 onClick={onClose}
-                className={({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${isActive ? 'bg-primary-fixed font-semibold text-on-surface shadow-sm' : 'text-on-surface-variant hover:bg-stone-50 hover:text-on-surface'}`}
+                className={({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors max-[700px]:py-1.5 ${isActive ? 'bg-primary-fixed font-semibold text-on-surface shadow-sm' : 'text-on-surface-variant hover:bg-stone-50 hover:text-on-surface'}`}
               >
                 <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
                 <span>{item.name}</span>
