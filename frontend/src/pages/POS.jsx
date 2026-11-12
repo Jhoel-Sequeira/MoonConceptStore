@@ -25,6 +25,14 @@ const formatInvoiceDate = (value) => new Intl.DateTimeFormat('es-NI', {
   day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
 }).format(new Date(value));
 const normalizeSearch = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const getLineDiscountCents = (item) => {
+  const priceCents = Math.round((Number(item.precio) || 0) * 100);
+  const value = Number(item.descuentoValor) || 0;
+  return item.descuentoTipo === 'porcentaje'
+    ? Math.round(priceCents * item.qty * value / 100)
+    : Math.round(value * 100) * item.qty;
+};
+const getLineTotalCents = (item) => Math.max(0, Math.round((Number(item.precio) || 0) * 100) * item.qty - getLineDiscountCents(item));
 export default function POSPage() {
   const { notify } = useFeedback();
   const [productos, setProductos] = useState([]);
@@ -200,7 +208,9 @@ export default function POSPage() {
           sku: product.sku,
           nombre: product.nombre,
           marca: product.marca_nombre || product.marca?.nombre_marca || 'General',
-          precio: parseFloat(product.precio) || 0,
+          precio: String(parseFloat(product.precio) || 0),
+          descuentoTipo: 'porcentaje',
+          descuentoValor: '0',
           stockMax: stockDisponible,
           qty: 1,
         },
@@ -288,9 +298,14 @@ export default function POSPage() {
     setCart(cart.filter((item) => item.id !== id));
   };
 
-  const subtotal = cart.reduce((acc, item) => acc + item.precio * item.qty, 0);
+  const updateLinePricing = (id, field, value) => {
+    setCart((current) => current.map((item) => item.id === id ? { ...item, [field]: value } : item));
+  };
+
+  const subtotalCents = cart.reduce((sum, item) => sum + getLineTotalCents(item), 0);
+  const subtotal = subtotalCents / 100;
   const totalItems = cart.reduce((acc, item) => acc + item.qty, 0);
-  const totalCents = Math.round(subtotal * 100);
+  const totalCents = subtotalCents;
   const cardCommissionCents = Math.round(totalCents * commissionRate / 100);
   const cashReceivedCents = Math.max(0, Math.round((Number(cashReceived.replace(',', '.')) || 0) * 100));
   const changeCents = Math.max(0, cashReceivedCents - totalCents);
@@ -318,13 +333,30 @@ export default function POSPage() {
   // Procesar venta en el Backend Python
   const handleCompleteSale = async (metodo) => {
     const paymentMethod = metodo || selectedMetodoPago;
+    const invalidPricing = cart.some((item) => {
+      const price = Number(item.precio);
+      const discount = Number(item.descuentoValor);
+      return !Number.isFinite(price) || price <= 0 || !Number.isFinite(discount) || discount < 0 ||
+        (item.descuentoTipo === 'porcentaje' ? discount > 100 : discount > price);
+    });
+    if (invalidPricing) {
+      notify('Revisa el precio y el descuento de cada producto antes de facturar.', 'warning');
+      return;
+    }
     if (paymentMethod === 'Efectivo' && cashReceivedCents < totalCents) return;
     try {
       setProcessingSale(true);
       const result = await posService.crearVenta({
         cliente_id: selectedClient?.id ?? null,
         metodo_pago: paymentMethod,
-        items: cart.map((item) => ({ producto_id: item.id, cantidad: item.qty })),
+        items: cart.map((item) => ({
+          producto_id: item.id,
+          cantidad: item.qty,
+          precio_unitario: Number(item.precio),
+          ...(item.descuentoTipo === 'porcentaje'
+            ? { descuento_porcentaje: Number(item.descuentoValor) }
+            : { descuento_unitario: Number(item.descuentoValor) }),
+        })),
       });
       setInvoice({
         ...result,
@@ -569,18 +601,16 @@ export default function POSPage() {
                 cart.map((item) => (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between gap-2 p-2 bg-surface-container-low/40 rounded-lg"
+                    className="flex flex-col gap-2 rounded-lg bg-surface-container-low/40 p-2"
                   >
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <span className="text-[11px] font-semibold text-primary">{item.marca}</span>
-                      <span className="font-semibold text-xs text-on-surface truncate">{item.nombre}</span>
-                      <span className="text-[11px] text-on-surface-variant font-mono">
-                        {formatCordobas(item.precio)} c/u
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-[11px] font-semibold text-primary">{item.marca}</span>
+                        <span className="truncate text-xs font-semibold text-on-surface">{item.nombre}</span>
+                      </div>
                       <div className="flex items-center bg-surface-container rounded-lg p-0.5">
                         <button
+                          type="button"
                           onClick={() => handleQtyChange(item.id, -1)}
                           className="w-6 h-6 flex items-center justify-center text-xs hover:bg-surface-container-high rounded"
                         >
@@ -588,22 +618,38 @@ export default function POSPage() {
                         </button>
                         <span className="w-6 text-center text-xs font-bold">{item.qty}</span>
                         <button
+                          type="button"
                           onClick={() => handleQtyChange(item.id, 1)}
                           className="w-6 h-6 flex items-center justify-center text-xs hover:bg-surface-container-high rounded"
                         >
                           +
                         </button>
                       </div>
-                      <span className="w-14 text-right font-bold text-xs font-mono">
-                        {formatCordobas(item.precio * item.qty)}
+                      <span className="w-16 text-right font-bold text-xs font-mono">
+                        {formatCordobas(getLineTotalCents(item) / 100)}
                       </span>
                       <button
+                        type="button"
                         onClick={() => handleRemoveItem(item.id)}
                         className="text-on-surface-variant hover:text-error p-1"
                       >
                         <span className="material-symbols-outlined text-[16px]">delete</span>
                       </button>
                     </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="text-[10px] font-medium text-on-surface-variant">Precio unitario
+                        <input type="number" min="0.01" step="0.01" value={item.precio} onChange={(event) => updateLinePricing(item.id, 'precio', event.target.value)} className="mt-0.5 w-full rounded-md border border-surface-container-high bg-white px-2 py-1.5 text-xs text-on-surface outline-none focus:border-primary" />
+                      </label>
+                      <label className="text-[10px] font-medium text-on-surface-variant">Descuento {item.descuentoTipo === 'fijo' ? 'por unidad' : 'porcentaje'}
+                        <div className="mt-0.5 flex overflow-hidden rounded-md border border-surface-container-high bg-white focus-within:border-primary">
+                          <input type="number" min="0" max={item.descuentoTipo === 'porcentaje' ? 100 : Number(item.precio) || undefined} step="0.01" value={item.descuentoValor} onChange={(event) => updateLinePricing(item.id, 'descuentoValor', event.target.value)} className="min-w-0 w-full px-2 py-1.5 text-xs text-on-surface outline-none" />
+                          <select aria-label="Tipo de descuento" value={item.descuentoTipo} onChange={(event) => updateLinePricing(item.id, 'descuentoTipo', event.target.value)} className="border-l border-surface-container-high bg-surface-container-low px-1 text-[10px] text-on-surface outline-none">
+                            <option value="porcentaje">%</option><option value="fijo">C$</option>
+                          </select>
+                        </div>
+                      </label>
+                    </div>
+                    {getLineDiscountCents(item) > 0 && <p className="text-right text-[10px] text-on-surface-variant">Descuento aplicado: {formatCordobas(getLineDiscountCents(item) / 100)}</p>}
                   </div>
                 ))
               )}
@@ -778,17 +824,17 @@ export default function POSPage() {
               <p className="mt-1 text-[10px]">#{String(invoice.id).padStart(6, '0')}</p>
               <p className="mt-2 text-[10px]">{formatInvoiceDate(invoice.fecha_venta)}</p>
             </header>
-            <div className="grid grid-cols-[1fr_34px_52px_56px] gap-1 border-b border-[#d8c9bf] py-2 text-[9px] font-bold uppercase">
-              <span>Producto</span><span className="text-right">Cant.</span><span className="text-right">Precio</span><span className="text-right">Total</span>
+            <div className="grid grid-cols-[1fr_26px_48px_48px_56px] gap-1 border-b border-[#d8c9bf] py-2 text-[9px] font-bold uppercase">
+              <span>Producto</span><span className="text-right">Cant.</span><span className="text-right">Precio</span><span className="text-right">Desc.</span><span className="text-right">Total</span>
             </div>
             <div className="border-b border-dashed border-[#c9a46d]/50 py-1">
-              {invoice.items.map((item) => <div key={item.producto_id} className="grid grid-cols-[1fr_34px_52px_56px] gap-1 py-2 text-[10px]">
-                <span className="break-words">{item.nombre}</span><span className="text-right">{item.cantidad}</span><span className="text-right">{formatCordobas(item.precio_unitario)}</span><span className="text-right">{formatCordobas(item.subtotal)}</span>
+              {invoice.items.map((item) => <div key={item.producto_id} className="grid grid-cols-[1fr_26px_48px_48px_56px] gap-1 py-2 text-[10px]">
+                <span className="break-words">{item.nombre}</span><span className="text-right">{item.cantidad}</span><span className="text-right">{formatCordobas(item.precio_unitario)}</span><span className="text-right">{formatCordobas(item.descuento)}</span><span className="text-right">{formatCordobas(item.subtotal)}</span>
               </div>)}
             </div>
             <div className="space-y-1 border-b border-dashed border-[#c9a46d]/50 py-3 text-[11px]">
-              <div className="flex justify-between"><span>Subtotal</span><span>{formatCordobas(invoice.subtotal ?? invoice.total)}</span></div>
-              <div className="flex justify-between"><span>Descuento</span><span>{formatCordobas(0)}</span></div>
+              <div className="flex justify-between"><span>Subtotal</span><span>{formatCordobas(invoice.subtotal_bruto ?? invoice.subtotal ?? invoice.total)}</span></div>
+              <div className="flex justify-between"><span>Descuento</span><span>{formatCordobas(invoice.descuento_total ?? 0)}</span></div>
               <div className="flex justify-between pt-1 text-sm font-bold"><span>Total</span><span>{formatCordobas(invoice.total)}</span></div>
               {invoice.efectivo_recibido !== null && <div className="flex justify-between pt-1"><span>Efectivo recibido</span><span>{formatCordobas(invoice.efectivo_recibido)}</span></div>}
               {invoice.vuelto !== null && <div className="flex justify-between font-bold"><span>Vuelto</span><span>{formatCordobas(invoice.vuelto)}</span></div>}

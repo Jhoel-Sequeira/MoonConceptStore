@@ -16,6 +16,20 @@ CENT = Decimal("0.01")
 DEFAULT_CARD_COMMISSION_PERCENT = Decimal("6.75")
 
 
+def _calculate_line_amounts(unit_price: Decimal, quantity: int, fixed_discount: Decimal, discount_percent: Decimal):
+    if fixed_discount and discount_percent:
+        raise ValueError("Usa un descuento fijo o porcentual por producto, no ambos")
+    if fixed_discount > unit_price:
+        raise ValueError("El descuento fijo no puede superar el precio unitario")
+    gross = (unit_price * quantity).quantize(CENT, rounding=ROUND_HALF_UP)
+    discount = (
+        (fixed_discount * quantity).quantize(CENT, rounding=ROUND_HALF_UP)
+        if fixed_discount
+        else (gross * discount_percent / Decimal("100")).quantize(CENT, rounding=ROUND_HALF_UP)
+    )
+    return gross, discount, gross - discount
+
+
 class POSService:
     @staticmethod
     def list_sales(
@@ -83,7 +97,7 @@ class POSService:
             item_rows = db.execute(text("""
                 SELECT vd.venta_id, vd.producto_id, p.nombre AS producto, p.sku,
                        m.id AS marca_id, m.nombre_marca AS marca,
-                       vd.cantidad, vd.precio_unitario, vd.subtotal
+                       vd.cantidad, vd.precio_unitario, vd.descuento, vd.subtotal
                 FROM venta_detalles vd
                 JOIN productos p ON p.id = vd.producto_id
                 JOIN marcas m ON m.id = p.marca_id
@@ -94,7 +108,7 @@ class POSService:
                 items_by_sale[item["venta_id"]].append({
                     "producto_id": item["producto_id"], "producto": item["producto"],
                     "sku": item["sku"], "marca_id": item["marca_id"], "marca": item["marca"],
-                    "cantidad": item["cantidad"], "precio_unitario": item["precio_unitario"], "subtotal": item["subtotal"],
+                    "cantidad": item["cantidad"], "precio_unitario": item["precio_unitario"], "descuento": item["descuento"], "subtotal": item["subtotal"],
                 })
         return {
             "pagina": page, "por_pagina": page_size, "total": int(summary["transacciones"]),
@@ -128,8 +142,13 @@ class POSService:
     def create_sale(db: Session, sale_in: VentaCreate, user_id: int) -> dict:
         # Consolidate repeated scans of the same QR into one invoice line.
         quantities = {}
+        item_options = {}
         for item in sale_in.items:
             quantities[item.producto_id] = quantities.get(item.producto_id, 0) + item.cantidad
+            options = (item.precio_unitario, item.descuento_unitario, item.descuento_porcentaje)
+            if item.producto_id in item_options and item_options[item.producto_id] != options:
+                raise ValueError("Un producto no puede tener precios o descuentos distintos en la misma factura")
+            item_options[item.producto_id] = options
 
         try:
             sale_day = business_day()
@@ -153,6 +172,8 @@ class POSService:
 
             lines = []
             total = Decimal("0.00")
+            gross_subtotal = Decimal("0.00")
+            discount_total = Decimal("0.00")
             for product_id, quantity in quantities.items():
                 product = by_id[product_id]
                 if product.estado_id != 1:
@@ -160,16 +181,27 @@ class POSService:
                 stock = InventarioService.get_stock(db, product.id)
                 if quantity > stock:
                     raise ValueError(f"Stock insuficiente para {product.nombre}: quedan {stock} unidades")
-                unit_price = Decimal(str(product.precio or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
+                requested_price, fixed_discount, discount_percent = item_options[product_id]
+                unit_price = Decimal(str(requested_price if requested_price is not None else product.precio or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
                 if unit_price <= 0:
                     raise ValueError(f"El producto {product.sku} no tiene un precio válido")
-                line_total = (unit_price * quantity).quantize(CENT, rounding=ROUND_HALF_UP)
+                fixed_discount = Decimal(str(fixed_discount or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
+                discount_percent = Decimal(str(discount_percent or 0))
+                try:
+                    gross_total, discount, line_total = _calculate_line_amounts(
+                        unit_price, quantity, fixed_discount, discount_percent,
+                    )
+                except ValueError as exc:
+                    raise ValueError(f"{product.nombre}: {exc}") from exc
+                gross_subtotal += gross_total
+                discount_total += discount
                 lines.append({
                     "producto_id": product.id,
                     "sku": product.sku or "",
                     "nombre": product.nombre,
                     "cantidad": quantity,
                     "precio_unitario": unit_price,
+                    "descuento": discount,
                     "subtotal": line_total,
                 })
                 total += line_total
@@ -238,7 +270,7 @@ class POSService:
             db.execute(
                 text("""
                     INSERT INTO venta_detalles (venta_id, producto_id, cantidad, precio_unitario, descuento, subtotal)
-                    VALUES (:sale_id, :product_id, :quantity, :unit_price, 0, :subtotal)
+                    VALUES (:sale_id, :product_id, :quantity, :unit_price, :discount, :subtotal)
                 """),
                 [
                     {
@@ -246,6 +278,7 @@ class POSService:
                         "product_id": line["producto_id"],
                         "quantity": line["cantidad"],
                         "unit_price": line["precio_unitario"],
+                        "discount": line["descuento"],
                         "subtotal": line["subtotal"],
                     }
                     for line in lines
@@ -278,6 +311,8 @@ class POSService:
                 "cliente": customer_name,
                 "metodo_pago": payment.metodo_pago,
                 "subtotal": subtotal,
+                "subtotal_bruto": gross_subtotal,
+                "descuento_total": discount_total,
                 "comision_pos": commission,
                 "total": total,
                 "items": lines,
