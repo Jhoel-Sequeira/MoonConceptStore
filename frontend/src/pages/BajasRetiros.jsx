@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { BrowserQRCodeReader } from '@zxing/browser';
 import brandConfig from '../brandConfig';
 import bajasRetirosService from '../services/bajasRetirosService';
 import marcasService from '../services/marcasService';
@@ -34,6 +35,39 @@ export default function BajasRetirosPage() {
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (!cameraOpen) return undefined;
+    let stopped = false;
+    let controls;
+    const startCamera = async () => {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        setCameraError('La cámara requiere HTTPS y permiso para acceder al dispositivo.');
+        return;
+      }
+      try {
+        const reader = new BrowserQRCodeReader();
+        const activeControls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
+          if (result && !stopped) {
+            processScannedCode(result.getText());
+            setCameraOpen(false);
+          }
+        });
+        if (stopped) activeControls.stop();
+        else controls = activeControls;
+      } catch (error) {
+        setCameraError(error.name === 'NotAllowedError'
+          ? 'No se concedió permiso para usar la cámara.'
+          : 'No se pudo iniciar la cámara. Verifica que el dispositivo tenga una cámara disponible.');
+      }
+    };
+    setCameraError('');
+    startCamera();
+    return () => { stopped = true; controls?.stop(); };
+  }, [cameraOpen]);
 
   const loadHistory = async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -131,18 +165,35 @@ export default function BajasRetirosPage() {
 
   const addProduct = (product) => {
     if (!product) return;
-    if (items.some((row) => row.producto_id === product.id)) {
-      setFormError('Ese producto ya está en la lista. Cambia la cantidad en su fila.');
-      return;
-    }
     setFormError('');
-    setItems((current) => [...current, {
-      producto_id: product.id,
-      nombre: product.nombre,
-      sku: product.sku,
-      stock_actual: Number(product.stock_actual || 0),
-      cantidad: 1,
-    }]);
+    setItems((current) => {
+      const existing = current.find((row) => row.producto_id === product.id);
+      if (existing) {
+        if (existing.cantidad >= existing.stock_actual) {
+          setFormError(`Ya se alcanzó el stock disponible (${existing.stock_actual}).`);
+          return current;
+        }
+        return current.map((row) => row.producto_id === product.id ? { ...row, cantidad: Number(row.cantidad) + 1 } : row);
+      }
+      return [...current, {
+        producto_id: product.id,
+        nombre: product.nombre,
+        sku: product.sku,
+        stock_actual: Number(product.stock_actual || 0),
+        cantidad: 1,
+      }];
+    });
+    setProductSearch('');
+    setProductSuggestionsOpen(false);
+  };
+
+  const processScannedCode = (value) => {
+    const code = String(value || '').trim().toLocaleLowerCase();
+    if (!code) return;
+    const product = productos.find((item) => [item.sku, item.codigo_qr]
+      .some((candidate) => String(candidate || '').trim().toLocaleLowerCase() === code));
+    if (product && Number(product.stock_actual) > 0) addProduct(product);
+    else setFormError(product ? `${product.nombre} no tiene existencias disponibles.` : `No se encontró producto para el código “${String(value).trim()}” en esta marca.`);
     setProductSearch('');
     setProductSuggestionsOpen(false);
   };
@@ -281,12 +332,13 @@ export default function BajasRetirosPage() {
                 <div className="relative mt-3">
                   <div className="flex items-center gap-2 rounded-lg border border-surface-container-high bg-white px-3 py-2.5 focus-within:border-primary">
                     <span className="material-symbols-outlined text-lg text-on-surface-variant">search</span>
-                    <input type="text" role="combobox" aria-expanded={productSuggestionsOpen} value={productSearch} onFocus={() => setProductSuggestionsOpen(true)} onBlur={() => setTimeout(() => setProductSuggestionsOpen(false), 120)} onChange={(event) => { setProductSearch(event.target.value); setProductSuggestionsOpen(true); }} disabled={!marcaId || loadingProducts} placeholder={loadingProducts ? 'Cargando inventario...' : marcaId ? 'Buscar producto por nombre o SKU' : 'Busca y selecciona una marca primero'} className="w-full bg-transparent text-sm outline-none disabled:cursor-not-allowed" />
+                    <input type="text" role="combobox" aria-expanded={productSuggestionsOpen} value={productSearch} onFocus={() => setProductSuggestionsOpen(true)} onBlur={() => setTimeout(() => setProductSuggestionsOpen(false), 120)} onChange={(event) => { setProductSearch(event.target.value); setProductSuggestionsOpen(true); }} onKeyDown={(event) => { if (event.key === 'Enter' && productSearch.trim()) { const exact = productos.find((product) => [product.sku, product.codigo_qr].some((code) => String(code || '').trim().toLocaleLowerCase() === productSearch.trim().toLocaleLowerCase())); if (exact) { event.preventDefault(); processScannedCode(productSearch); } } }} disabled={!marcaId || loadingProducts} placeholder={loadingProducts ? 'Cargando inventario...' : marcaId ? 'Busca o escanea SKU / QR y presiona Enter' : 'Busca y selecciona una marca primero'} className="w-full bg-transparent text-sm outline-none disabled:cursor-not-allowed" />
+                    <button type="button" onClick={() => setCameraOpen(true)} disabled={!marcaId || loadingProducts} title="Escanear QR con cámara" className="rounded-md p-1 text-primary hover:bg-surface-container-low disabled:opacity-40"><span className="material-symbols-outlined">qr_code_scanner</span></button>
                   </div>
                   {productSuggestionsOpen && marcaId && <div className="mt-1 max-h-64 w-full overflow-auto rounded-xl border border-surface-container-high bg-white p-1 shadow-lg">
                     {loadingProducts ? <p className="px-3 py-2 text-sm text-on-surface-variant">Cargando inventario...</p> : productMatches.length ? productMatches.map((product) => <button key={product.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => addProduct(product)} className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-surface-container-low"><span className="min-w-0"><span className="block truncate text-sm font-medium text-on-surface">{product.nombre}</span><span className="block text-xs text-on-surface-variant">{product.sku || 'Sin SKU'} - {product.stock_actual} disponibles</span></span><span className="material-symbols-outlined text-primary">add_circle</span></button>) : <p className="px-3 py-2 text-sm text-on-surface-variant">No hay productos con stock que coincidan.</p>}
                   </div>}
-                  <p className="mt-1 text-xs text-on-surface-variant">Busca por nombre o SKU. Al seleccionar un resultado, se agrega al retiro.</p>
+                  <p className="mt-1 text-xs text-on-surface-variant">Busca por nombre o SKU, usa un lector conectado y presiona Enter, o escanea con la cámara. Cada escaneo agrega una unidad.</p>
                 </div>
                 {items.length > 0 ? <div className="mt-4 divide-y divide-surface-container-low">
                   {items.map((item) => <div key={item.producto_id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center">
@@ -306,6 +358,13 @@ export default function BajasRetirosPage() {
               <div className="flex justify-end gap-2"><button type="button" disabled={saving} onClick={() => setModalOpen(false)} className="rounded-lg border border-surface-container-high px-4 py-2 text-sm text-on-surface">Cancelar</button><button type="submit" disabled={saving || !items.length} className="inline-flex items-center gap-2 rounded-lg bg-error px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{saving ? 'Guardando…' : 'Confirmar retiro'}</button></div>
             </footer>
           </form>
+        </section>
+      </div>}
+
+      {cameraOpen && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setCameraOpen(false); }}>
+        <section role="dialog" aria-modal="true" aria-labelledby="retiro-qr-title" className="w-full max-w-md overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl">
+          <header className="flex items-center justify-between border-b border-surface-container-low p-4"><div><h2 id="retiro-qr-title" className="font-bold text-on-surface">Escanear producto</h2><p className="text-xs text-on-surface-variant">Enfoca el código QR del producto</p></div><button type="button" onClick={() => setCameraOpen(false)} aria-label="Cerrar escáner" className="rounded-lg p-2 hover:bg-surface-container-low"><span className="material-symbols-outlined">close</span></button></header>
+          <div className="space-y-3 p-4"><video ref={videoRef} className="aspect-video w-full rounded-xl bg-black object-cover" muted playsInline />{cameraError && <p role="alert" className="rounded-lg bg-error-container p-3 text-sm text-on-error-container">{cameraError}</p>}</div>
         </section>
       </div>}
 
