@@ -38,9 +38,10 @@ class _BrandResult:
     def all(self):
         return [{
             "venta_id": 17, "fecha_venta": datetime(2026, 9, 12, 18, 0), "total_venta": Decimal("10.00"),
-            "cliente": "Cliente Demo", "producto": "Producto Demo", "sku": "SKU-4", "cantidad": 2,
+            "comision_pos": Decimal("0.00"), "subtotal_venta": Decimal("10.00"), "marca": "Marca Demo",
+            "producto": "Producto Demo", "sku": "SKU-4", "tamano": "M", "color": "Negro", "cantidad": 2,
             "precio_unitario": Decimal("5.00"), "descuento": Decimal("0.00"), "subtotal": Decimal("10.00"),
-            "metodos_pago": "Efectivo: C$ 10.00",
+            "metodos_pago": "Efectivo",
         }]
 
 
@@ -52,13 +53,13 @@ class _BrandDb:
 brand_report = {
     "por_marca": [{
         "marca_id": 1, "marca": "Marca Demo", "cantidad": 2, "ventas_brutas": Decimal("10.00"),
-        "comision_tienda": Decimal("2.00"), "neto_pagar": Decimal("8.00"), "comision_pos": Decimal("0.00"),
+        "comision_tienda": Decimal("0.00"), "neto_pagar": Decimal("10.00"), "comision_pos": Decimal("0.00"),
         "por_metodo": {"efectivo": Decimal("10.00"), "tarjeta": Decimal("0.00"), "transferencia": Decimal("0.00")},
     }],
     "por_producto": [{
         "marca_id": 1, "producto_id": 4, "producto": "Producto Demo", "sku": "SKU-4", "cantidad": 2,
         "bruto": Decimal("10.00"), "metodos": {"efectivo": Decimal("10.00"), "tarjeta": Decimal("0.00"), "transferencia": Decimal("0.00")},
-        "comision_pos": Decimal("0.00"), "comision_tienda": Decimal("2.00"), "neto_marca": Decimal("8.00"),
+        "comision_pos": Decimal("0.00"), "comision_tienda": Decimal("0.00"), "neto_marca": Decimal("10.00"),
     }],
 }
 _report = LiquidacionesService.__dict__["report"]
@@ -75,10 +76,15 @@ assert workbook_name == "Liquidacion_Marca_Demo_2026-09.xlsx"
 assert sheet["B2"].value == "LIQUIDACIÓN MENSUAL · DETALLE DE VENTAS"
 assert sheet["A10"].fill.fgColor.rgb.endswith("FFFFFF") and sheet["A10"].font.color.rgb.endswith("493A35")
 assert sheet["E10"].fill.fgColor.rgb.endswith("C9A46D")
-assert sheet["J12"].value == 2.0 and sheet["K12"].value == 8.0
+assert sheet["F8"].value == 10.0 and sheet["J12"].value == 10.0
 sales_sheet = load_workbook(BytesIO(workbook_bytes), data_only=True)["Ventas_Detalladas"]
-assert sales_sheet["A2"].value == 17 and sales_sheet["C2"].value == "Cliente Demo"
-assert sales_sheet["F2"].value == "Producto Demo" and sales_sheet["J2"].value == 10.0
-assert sales_sheet["B2"].value.hour == 12 and sales_sheet["B2"].value.tzinfo is None
-assert sales_sheet["A3"].value == "TOTALES" and sales_sheet["G3"].value == 2
-assert sales_sheet["J3"].value == 10.0 and sales_sheet["K3"].value == 10.0
+assert [sales_sheet.cell(1, column).value for column in range(1, 13)] == [
+    "FECHA", "MARCA", "C\u00d3DIGO", "SALIDA", "DESCRIPCI\u00d3N", "TALLA", "COLOR",
+    "TIPO_VENTA", "MONTO", "COMISI\u00d3N BANCARIA", "DESCUENTO", "TOTAL",
+]
+assert sales_sheet["A2"].value.hour == 12 and sales_sheet["A2"].value.tzinfo is None
+assert sales_sheet["B2"].value == "Marca Demo" and sales_sheet["C2"].value == "SKU-4"
+assert sales_sheet["D2"].value == 2 and sales_sheet["E2"].value == "Producto Demo"
+assert sales_sheet["I2"].value == 10.0 and sales_sheet["J2"].value == 0.0 and sales_sheet["L2"].value == 10.0
+assert sales_sheet["A3"].value == "TOTALES" and sales_sheet["D3"].value == 2
+assert sales_sheet["I3"].value == 10.0 and sales_sheet["L3"].value == 10.0
