@@ -192,20 +192,19 @@ class LiquidacionesService:
         first, last = _period(period)
         start, end = utc_naive_bounds(first, last + timedelta(days=1))
         sales = db.execute(text("""
-            SELECT v.id AS venta_id, v.fecha_venta, v.total AS total_venta,
-                   COALESCE(c.nombre_cliente, 'Consumidor Final') AS cliente,
-                   p.nombre AS producto, p.sku, vd.cantidad, vd.precio_unitario,
-                   vd.descuento, vd.subtotal,
+            SELECT v.id AS venta_id, v.fecha_venta, v.total AS total_venta, v.comision_pos,
+                   m.nombre_marca AS marca, p.nombre AS producto, p.sku, p.tamano,
+                   p.detalles_rubro->>'color' AS color,
+                   vd.cantidad, vd.precio_unitario, vd.descuento, vd.subtotal,
                    COALESCE(pagos.metodos_pago, '—') AS metodos_pago,
-                   COALESCE(pagos.montos_pago, '—') AS montos_pago
+                   (SELECT sum(vd_all.subtotal) FROM venta_detalles vd_all WHERE vd_all.venta_id = v.id) AS subtotal_venta
             FROM ventas v
             JOIN estados e ON e.id = v.estado_id AND e.modulo = 'ventas' AND e.nombre = 'Facturada'
             JOIN venta_detalles vd ON vd.venta_id = v.id
             JOIN productos p ON p.id = vd.producto_id
-            LEFT JOIN clientes c ON c.id = v.cliente_id
+            JOIN marcas m ON m.id = p.marca_id
             LEFT JOIN LATERAL (
-                SELECT string_agg(pv.metodo_pago, ' | ' ORDER BY pv.id) AS metodos_pago,
-                       string_agg('C$ ' || to_char(pv.monto, 'FM9999999990.00'), ' | ' ORDER BY pv.id) AS montos_pago
+                SELECT string_agg(DISTINCT pv.metodo_pago, ' | ' ORDER BY pv.metodo_pago) AS metodos_pago
                 FROM pagos_venta pv WHERE pv.venta_id = v.id
             ) pagos ON true
             WHERE p.marca_id = :brand_id AND v.fecha_venta >= :start AND v.fecha_venta < :end
@@ -377,8 +376,8 @@ class LiquidacionesService:
         sales_ws = wb.create_sheet("Ventas_Detalladas")
         sales_ws.sheet_view.showGridLines = False
         sales_ws.freeze_panes = "A2"
-        sales_headers = ["Venta #", "Fecha y hora", "Cliente", "Método(s) de pago", "Monto(s) de pago", "SKU", "Producto", "Unidades", "Precio unitario", "Descuento", "Subtotal de línea", "Total de la venta"]
-        sales_widths = [12, 21, 30, 25, 24, 18, 34, 12, 18, 16, 20, 20]
+        sales_headers = ["FECHA", "MARCA", "CÓDIGO", "SALIDA", "DESCRIPCIÓN", "TALLA", "COLOR", "TIPO_VENTA", "MONTO", "COMISIÓN BANCARIA", "DESCUENTO", "TOTAL"]
+        sales_widths = [20, 24, 18, 12, 34, 12, 16, 22, 16, 20, 16, 16]
         for column, (label, width) in enumerate(zip(sales_headers, sales_widths), start=1):
             cell = sales_ws.cell(1, column, label)
             cell.font = Font(name="Segoe UI", size=9, bold=True, color=ink)
@@ -387,38 +386,53 @@ class LiquidacionesService:
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             sales_ws.column_dimensions[get_column_letter(column)].width = width
         sales_ws.row_dimensions[1].height = 34
+        fee_allocations = {}
+        grouped_sales = {}
+        for sale_line in sales:
+            grouped_sales.setdefault(sale_line["venta_id"], []).append(sale_line)
+        for sale_lines in grouped_sales.values():
+            fee = _decimal(sale_lines[0]["comision_pos"])
+            if _decimal(sale_lines[0]["total_venta"]) > _decimal(sale_lines[0]["subtotal_venta"]):
+                fee = Decimal("0")  # ponytail: old sales already charged the fee to the customer.
+            brand_subtotal = sum((_decimal(line["subtotal"]) for line in sale_lines), Decimal("0"))
+            full_subtotal = _decimal(sale_lines[0]["subtotal_venta"])
+            brand_fee = _allocate(fee, [brand_subtotal, max(full_subtotal - brand_subtotal, Decimal("0"))])[0]
+            fee_allocations.update({id(line): amount for line, amount in zip(
+                sale_lines, _allocate(brand_fee, [_decimal(line["subtotal"]) for line in sale_lines])
+            )})
         for row_index, sale_line in enumerate(sales, start=2):
             # ponytail: Excel stores the Managua wall time without timezone metadata.
             sale_date = sale_line["fecha_venta"].replace(tzinfo=timezone.utc).astimezone(MANAGUA).replace(tzinfo=None)
-            values = [sale_line["venta_id"], sale_date, sale_line["cliente"], sale_line["metodos_pago"], sale_line["montos_pago"],
-                      sale_line["sku"] or "—", sale_line["producto"], sale_line["cantidad"],
-                      sale_line["precio_unitario"], sale_line["descuento"], sale_line["subtotal"], sale_line["total_venta"]]
+            gross = _decimal(sale_line["precio_unitario"]) * int(sale_line["cantidad"])
+            values = [sale_date, sale_line["marca"], sale_line["sku"] or "—", sale_line["cantidad"], sale_line["producto"],
+                      sale_line["tamano"] or "—", sale_line["color"] or "—", sale_line["metodos_pago"], gross,
+                      fee_allocations[id(sale_line)], sale_line["descuento"], sale_line["subtotal"]]
             for column, value in enumerate(values, start=1):
                 cell = sales_ws.cell(row_index, column, float(value) if isinstance(value, Decimal) else value)
                 cell.font = Font(name="Segoe UI", size=9, color=ink)
                 cell.fill = PatternFill("solid", fgColor=zebra if row_index % 2 == 0 else white)
                 cell.border = border
-                cell.alignment = Alignment(vertical="center", horizontal="right" if column >= 8 else "left", wrap_text=column in (3, 4, 5, 7))
-                if column == 2:
+                cell.alignment = Alignment(vertical="center", horizontal="right" if column in (4, 9, 10, 11, 12) else "left", wrap_text=column in (2, 5, 8))
+                if column == 1:
                     cell.number_format = "dd/mm/yyyy hh:mm"
-                elif column >= 8:
+                elif column in (9, 10, 11, 12):
                     cell.number_format = '"C$"#,##0.00'
             sales_ws.row_dimensions[row_index].height = 25
         if sales:
             totals_row = len(sales) + 2
-            unique_sales = {row["venta_id"]: _decimal(row["total_venta"]) for row in sales}
-            sales_ws.merge_cells(start_row=totals_row, start_column=1, end_row=totals_row, end_column=7)
+            sales_ws.merge_cells(start_row=totals_row, start_column=1, end_row=totals_row, end_column=3)
             total_label = sales_ws.cell(totals_row, 1, "TOTALES")
             total_label.alignment = Alignment(horizontal="right", vertical="center")
             total_label.font = Font(name="Segoe UI", size=9, bold=True, color=white)
             for column, amount in (
-                (8, sum(int(row["cantidad"]) for row in sales)),
-                (10, sum((_decimal(row["descuento"]) for row in sales), Decimal("0"))),
-                (11, sum((_decimal(row["subtotal"]) for row in sales), Decimal("0"))),
-                (12, sum(unique_sales.values(), Decimal("0"))),
+                (4, sum(int(row["cantidad"]) for row in sales)),
+                (9, sum((_decimal(row["precio_unitario"]) * int(row["cantidad"]) for row in sales), Decimal("0"))),
+                (10, sum(fee_allocations.values(), Decimal("0"))),
+                (11, sum((_decimal(row["descuento"]) for row in sales), Decimal("0"))),
+                (12, sum((_decimal(row["subtotal"]) for row in sales), Decimal("0"))),
             ):
                 cell = sales_ws.cell(totals_row, column, float(amount) if isinstance(amount, Decimal) else amount)
-                cell.number_format = "0" if column == 8 else '"C$"#,##0.00'
+                cell.number_format = "0" if column == 4 else '"C$"#,##0.00'
                 cell.alignment = Alignment(horizontal="right", vertical="center")
                 cell.font = Font(name="Segoe UI", size=9, bold=True, color=white)
             for row in sales_ws.iter_rows(min_row=totals_row, max_row=totals_row, min_col=1, max_col=12):
