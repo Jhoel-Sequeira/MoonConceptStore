@@ -4,6 +4,7 @@ from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from io import BytesIO
 import re
 import unicodedata
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import HTTPException
 import openpyxl
@@ -50,9 +51,18 @@ def _allocate(total: Decimal, weights: list[Decimal]) -> list[Decimal]:
 
 class LiquidacionesService:
     @staticmethod
-    def report(db: Session, period: str, _compare: bool = True) -> dict:
-        first, last = _period(period)
+    def report(db: Session, period: str | None, _compare: bool = True, *, desde: date | None = None,
+               hasta: date | None = None, brand_ids: list[int] | None = None) -> dict:
+        if desde is not None or hasta is not None:
+            if period or desde is None or hasta is None or desde > hasta:
+                raise HTTPException(status_code=422, detail="Indica un rango de fechas válido.")
+            first, last = desde, hasta
+        elif period:
+            first, last = _period(period)
+        else:
+            raise HTTPException(status_code=422, detail="Indica un mes o un rango de fechas.")
         start, end = utc_naive_bounds(first, last + timedelta(days=1))
+        brand_ids = sorted(set(brand_ids or []))
         product_rows = db.execute(text("""
             SELECT v.id AS venta_id, v.fecha_venta, v.total, v.comision_pos,
                    vd.producto_id, vd.cantidad, vd.subtotal, p.nombre, p.sku,
@@ -68,16 +78,16 @@ class LiquidacionesService:
             ORDER BY v.id, p.marca_id, vd.producto_id
         """), {"start": start, "end": end}).mappings().all()
         payment_rows = db.execute(text("""
-            SELECT lower(trim(pv.metodo_pago)) AS metodo, COALESCE(sum(pv.monto), 0) AS cobrado
+            SELECT v.id AS venta_id, lower(trim(pv.metodo_pago)) AS metodo, COALESCE(sum(pv.monto), 0) AS cobrado
             FROM pagos_venta pv JOIN ventas v ON v.id = pv.venta_id
             JOIN estados e ON e.id = v.estado_id AND e.modulo = 'ventas' AND e.nombre = 'Facturada'
             WHERE v.fecha_venta >= :start AND v.fecha_venta < :end
-            GROUP BY lower(trim(pv.metodo_pago))
+            GROUP BY v.id, lower(trim(pv.metodo_pago))
         """), {"start": start, "end": end}).mappings().all()
 
         sales = {}
         products = {}
-        daily = {}
+        daily_by_brand = {}
         brand_map = {}
         sale_lines = {}
         for row in product_rows:
@@ -109,7 +119,7 @@ class LiquidacionesService:
             brand["cantidad"] += int(row["cantidad"])
             brand["por_metodo"][method_key] += line_amount
             local_day = row["fecha_venta"].replace(tzinfo=timezone.utc).astimezone(MANAGUA).date().isoformat()
-            day = daily.setdefault(local_day, {"fecha": local_day, "ventas_brutas": Decimal("0"), "cantidad": 0})
+            day = daily_by_brand.setdefault((local_day, row["marca_id"]), {"fecha": local_day, "ventas_brutas": Decimal("0"), "cantidad": 0})
             day["ventas_brutas"] += line_amount
             day["cantidad"] += int(row["cantidad"])
 
@@ -122,7 +132,19 @@ class LiquidacionesService:
                 brand_map[brand_id]["comision_pos"] += fee_share
                 products[(brand_id, product_id)]["comision_pos"] += fee_share
 
-        collected = {str(row["metodo"]): _decimal(row["cobrado"]) for row in payment_rows}
+        collected = {method: Decimal("0") for method in ("efectivo", "tarjeta", "transferencia")}
+        selected_brands = set(brand_ids)
+        for payment_row in payment_rows:
+            method = str(payment_row["metodo"])
+            if method not in collected:
+                continue
+            weights_by_brand = {}
+            for brand_id, _, amount in sale_lines.get(payment_row["venta_id"], []):
+                weights_by_brand[brand_id] = weights_by_brand.get(brand_id, Decimal("0")) + amount
+            allocations = _allocate(_decimal(payment_row["cobrado"]), list(weights_by_brand.values()))
+            for brand_id, amount in zip(weights_by_brand, allocations):
+                if not brand_ids or brand_id in selected_brands:
+                    collected[method] += amount
         brands = []
         for brand in brand_map.values():
             commission = Decimal("0.00")
@@ -130,6 +152,19 @@ class LiquidacionesService:
                 **brand, "comision_tienda": commission,
                 "neto_pagar": brand["ventas_brutas"] - brand["comision_pos"],
             })
+        if brand_ids:
+            brands = [brand for brand in brands if brand["marca_id"] in selected_brands]
+            products = {key: item for key, item in products.items() if item["marca_id"] in selected_brands}
+            selected_sales = {sale_id for sale_id, lines in sale_lines.items() if any(line[0] in selected_brands for line in lines)}
+        else:
+            selected_sales = set(sales)
+        daily = {}
+        for (day_date, brand_id), day in daily_by_brand.items():
+            if brand_ids and brand_id not in set(brand_ids):
+                continue
+            total = daily.setdefault(day_date, {"fecha": day_date, "ventas_brutas": Decimal("0"), "cantidad": 0})
+            total["ventas_brutas"] += day["ventas_brutas"]
+            total["cantidad"] += day["cantidad"]
         gross = sum((row["ventas_brutas"] for row in brands), Decimal("0"))
         store_commission = sum((row["comision_tienda"] for row in brands), Decimal("0"))
         pos_fee = sum((row["comision_pos"] for row in brands), Decimal("0"))
@@ -142,7 +177,7 @@ class LiquidacionesService:
                 item["comision_tienda"] = Decimal("0.00")
                 item["neto_marca"] = item["bruto"] - item["comision_pos"]
         result = {
-            "periodo": period,
+            "periodo": period or f"{first.isoformat()}..{last.isoformat()}",
             "resumen": {
                 "ventas_brutas": gross,
                 "comision_tienda": store_commission,
@@ -151,16 +186,16 @@ class LiquidacionesService:
                 "cobrado_efectivo": collected.get("efectivo", Decimal("0")),
                 "cobrado_tarjeta": collected.get("tarjeta", Decimal("0")),
                 "cobrado_transferencia": collected.get("transferencia", Decimal("0")),
-                "transacciones": len(sales),
+                "transacciones": len(selected_sales),
             },
             "por_dia": sorted(daily.values(), key=lambda row: row["fecha"]),
             "por_marca": sorted(brands, key=lambda row: row["marca"].casefold()),
             "por_producto": sorted(products.values(), key=lambda row: (row["marca"].casefold(), row["producto"].casefold())),
         }
-        if _compare:
+        if _compare and period:
             previous_first = first - timedelta(days=1)
             previous_period = previous_first.strftime("%Y-%m")
-            previous = LiquidacionesService.report(db, previous_period, _compare=False)["resumen"]
+            previous = LiquidacionesService.report(db, previous_period, _compare=False, brand_ids=brand_ids)["resumen"]
             previous_gross = previous["ventas_brutas"]
             result["comparacion_mes_anterior"] = {
                 "periodo": previous_period,
@@ -467,20 +502,24 @@ class LiquidacionesService:
         return [dict(row) for row in rows]
 
     @staticmethod
-    def generate(db: Session, period: str) -> list[dict]:
+    def generate(db: Session, period: str, brand_ids: list[int] | None = None) -> list[dict]:
         first, last = _period(period)
         current_month = datetime.now(MANAGUA).date().replace(day=1)
         if first >= current_month:
             raise HTTPException(status_code=422, detail="Solo se pueden generar liquidaciones de meses ya finalizados.")
         report = LiquidacionesService.report(db, period)
-        if not report["por_marca"]:
+        selected_ids = sorted(set(brand_ids)) if brand_ids is not None else None
+        if selected_ids == []:
+            raise HTTPException(status_code=422, detail="Selecciona al menos una marca.")
+        brands_to_generate = [brand for brand in report["por_marca"] if selected_ids is None or brand["marca_id"] in selected_ids]
+        if not brands_to_generate:
             raise HTTPException(status_code=422, detail="No hay ventas registradas en ese período.")
         try:
             lock_day(db, first)
             pending_id = db.execute(text("SELECT id FROM estados WHERE modulo = 'liquidaciones' AND nombre = 'Pendiente' ORDER BY id LIMIT 1")).scalar()
             if pending_id is None:
                 raise HTTPException(status_code=500, detail="Falta configurar el estado Pendiente de liquidaciones.")
-            for brand in report["por_marca"]:
+            for brand in brands_to_generate:
                 settlement_id = db.execute(text("""
                     INSERT INTO liquidaciones
                     (marca_id, periodo_inicio, periodo_fin, total_bruto, total_comision_pos,
@@ -542,13 +581,32 @@ class LiquidacionesService:
                         **detail
                     })
             db.commit()
-            return LiquidacionesService.list_for_period(db, period)
+            settlements = LiquidacionesService.list_for_period(db, period)
+            return [item for item in settlements if selected_ids is None or item["marca_id"] in selected_ids]
         except HTTPException:
             db.rollback()
             raise
         except Exception:
             db.rollback()
             raise
+
+    @staticmethod
+    def generate_and_export(db: Session, period: str, brand_ids: list[int]) -> tuple[bytes, str, int, int]:
+        selected_ids = sorted(set(brand_ids))
+        if not selected_ids:
+            raise HTTPException(status_code=422, detail="Selecciona al menos una marca.")
+        report = LiquidacionesService.report(db, period)
+        sales_brand_ids = {brand["marca_id"] for brand in report["por_marca"]}
+        export_ids = [brand_id for brand_id in selected_ids if brand_id in sales_brand_ids]
+        if not export_ids:
+            raise HTTPException(status_code=422, detail="No hay ventas de las marcas seleccionadas en ese mes.")
+        LiquidacionesService.generate(db, period, export_ids)
+        output = BytesIO()
+        with ZipFile(output, "w", ZIP_DEFLATED) as archive:
+            for brand_id in export_ids:
+                content, filename = LiquidacionesService.generate_brand_excel(db, brand_id, period)
+                archive.writestr(filename, content)
+        return output.getvalue(), f"Liquidaciones_{period}.zip", len(export_ids), len(selected_ids) - len(export_ids)
 
     @staticmethod
     def mark_paid(db: Session, settlement_id: int, payment_date: date, reference: str) -> dict:

@@ -50,19 +50,24 @@ function buildBrandStatementHtml(brand, period, settlement, productRows, metadat
 
 export default function LiquidacionesPage() {
   const [period, setPeriod] = useState(currentPeriod());
+  const [dateFilterMode, setDateFilterMode] = useState('month');
+  const [reportStart, setReportStart] = useState(`${currentPeriod()}-01`);
+  const [reportEnd, setReportEnd] = useState(todayLocal());
   const [report, setReport] = useState(null);
   const [settlements, setSettlements] = useState([]);
   const [selected, setSelected] = useState(null);
   const [paymentDate, setPaymentDate] = useState(todayLocal());
   const [reference, setReference] = useState('');
   const [filter, setFilter] = useState('Todos');
-  const [brandFilter, setBrandFilter] = useState('');
+  const [selectedBrandIds, setSelectedBrandIds] = useState(null);
   const [brandSearch, setBrandSearch] = useState('');
   const [brandSearchOpen, setBrandSearchOpen] = useState(false);
+  const [previewCandidateBrandId, setPreviewCandidateBrandId] = useState('');
   const [previewBrandId, setPreviewBrandId] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [view, setView] = useState('report');
   const [brands, setBrands] = useState([]);
   const [salesFilters, setSalesFilters] = useState(initialSalesFilters());
@@ -75,11 +80,20 @@ export default function LiquidacionesPage() {
   const isPastPeriod = period < nowPeriod;
 
   const refresh = async () => {
+    if (dateFilterMode !== 'month' && (!reportStart || (dateFilterMode === 'range' && (!reportEnd || reportStart > reportEnd)))) {
+      setLoading(false);
+      setError('Selecciona fechas válidas para el reporte.');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
+      const reportFilters = dateFilterMode === 'month'
+        ? { periodo: period }
+        : { desde: reportStart, hasta: dateFilterMode === 'date' ? reportStart : reportEnd };
+      if (selectedBrandIds !== null) reportFilters.marca_ids = selectedBrandIds;
       const [monthlyReport, monthlySettlements] = await Promise.all([
-        finanzasService.obtenerReporte(period), finanzasService.obtenerLiquidaciones(period),
+        finanzasService.obtenerReporte(reportFilters), finanzasService.obtenerLiquidaciones(period),
       ]);
       setReport(monthlyReport);
       setSettlements(monthlySettlements);
@@ -89,7 +103,7 @@ export default function LiquidacionesPage() {
       setLoading(false);
     }
   };
-  useEffect(() => { refresh(); }, [period]);
+  useEffect(() => { refresh(); }, [period, dateFilterMode, reportStart, reportEnd, selectedBrandIds]);
   useEffect(() => {
     api.get('/marcas/').then(({ data }) => setBrands(Array.isArray(data) ? data : [])).catch(() => setBrands([]));
   }, []);
@@ -138,8 +152,11 @@ export default function LiquidacionesPage() {
   const generate = async () => {
     setSaving(true);
     setError('');
+    setNotice('');
     try {
-      await finanzasService.generarLiquidaciones(period);
+      const brandIds = selectedBrandIds ?? brands.map((brand) => brand.id);
+      const result = await finanzasService.generarYDescargarLiquidaciones(period, brandIds);
+      setNotice(`${result.exportadas} liquidaciones exportadas en Excel.${result.sinVentas ? ` ${result.sinVentas} marcas seleccionadas no tuvieron ventas en ${period}.` : ''}`);
       await refresh();
     } catch (err) {
       setError(err.response?.data?.detail || 'No se pudieron generar las liquidaciones.');
@@ -153,31 +170,40 @@ export default function LiquidacionesPage() {
     return report.por_marca.map((brand) => {
       const settlement = settlements.find((item) => item.marca_id === brand.marca_id);
       return { ...brand, settlement };
-    }).filter((brand) => (filter === 'Todos' || brand.settlement?.estado === filter)
-      && (brandFilter ? String(brand.marca_id) === brandFilter : normalizeText(brand.marca).includes(normalizeText(brandSearch))));
-  }, [report, settlements, filter, brandFilter, brandSearch]);
+    }).filter((brand) => (filter === 'Todos' || brand.settlement?.estado === filter));
+  }, [report, settlements, filter]);
 
   const brandSuggestions = (report?.por_marca || [])
     .filter((brand) => normalizeText(brand.marca).includes(normalizeText(brandSearch)))
     .slice(0, 8);
 
   const selectReportBrand = (brand) => {
-    setBrandFilter(String(brand.marca_id));
     setBrandSearch(brand.marca);
+    setPreviewCandidateBrandId(String(brand.marca_id));
     setBrandSearchOpen(false);
-    setPreviewBrandId('');
   };
 
+  const allBrandIds = brands.map((brand) => brand.id);
+  const effectiveBrandIds = selectedBrandIds ?? allBrandIds;
+  const toggleBrandSelection = (brandId) => setSelectedBrandIds((current) => {
+    const selectedIds = current ?? allBrandIds;
+    const next = selectedIds.includes(brandId)
+      ? selectedIds.filter((id) => id !== brandId)
+      : [...selectedIds, brandId];
+    if (!next.length) return selectedIds;
+    return next.length === allBrandIds.length ? null : next;
+  });
+
   const exportCsv = () => {
-    if (!report) return;
-    const columns = ['Marca', 'Unidades', 'Ventas brutas', 'Neto marca', 'Comisión terminal POS', 'Efectivo', 'Tarjeta', 'Transferencia', 'Estado', 'Fecha pago', 'Referencia'];
-    const values = rows.map((row) => [row.marca, row.cantidad, row.ventas_brutas, row.neto_pagar, row.comision_pos,
+    if (!report || !rows.length) return;
+    const columns = ['Período del reporte', 'Marca', 'Unidades', 'Ventas brutas', 'Neto marca', 'Comisión terminal POS', 'Efectivo', 'Tarjeta', 'Transferencia', 'Estado', 'Fecha pago', 'Referencia'];
+    const values = rows.map((row) => [report.periodo, row.marca, row.cantidad, row.ventas_brutas, row.neto_pagar, row.comision_pos,
       row.por_metodo.efectivo, row.por_metodo.tarjeta, row.por_metodo.transferencia,
       row.settlement?.estado || 'Sin liquidar', row.settlement?.fecha_pago || '', row.settlement?.referencia_pago || '']);
     const csv = [columns, ...values].map((line) => line.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' }));
-    link.download = `reporte_liquidaciones_${period}.csv`;
+    link.download = `reporte_liquidaciones_${String(report.periodo || period).replaceAll('..', '_')}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
   };
@@ -229,14 +255,14 @@ export default function LiquidacionesPage() {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-surface-container-lowest p-space-lg rounded-xl shadow-sm">
         <div>
           <h1 className="font-headline-md text-headline-md text-on-surface">{view === 'report' ? 'Reportes y liquidaciones' : 'Historial de ventas'}</h1>
-          <p className="text-sm text-on-surface-variant">Ventas mensuales y liquidación por marca.</p>
+          <p className="text-sm text-on-surface-variant">Ventas por período y liquidación mensual por marca.</p>
         </div>
         {view === 'report' && <div className="flex flex-wrap gap-2">
-          <label className="sr-only" htmlFor="period">Mes del reporte</label>
+          <label className="sr-only" htmlFor="period">{dateFilterMode === 'month' ? 'Mes del reporte y liquidación' : 'Mes de liquidación'}</label>
           <input id="period" type="month" value={period} max={nowPeriod} onChange={(e) => setPeriod(e.target.value)} className="px-3 py-2 rounded-lg border border-outline-variant" />
-          <button type="button" onClick={exportCsv} disabled={!report} className="px-4 py-2 rounded-lg bg-surface-container-low text-on-surface font-semibold disabled:opacity-50">Exportar CSV</button>
-          <button type="button" onClick={generate} disabled={!isPastPeriod || saving || !report?.por_marca?.length} title={!isPastPeriod ? 'Las liquidaciones se generan cuando termina el mes.' : ''} className="px-4 py-2 rounded-lg bg-primary text-on-primary font-semibold disabled:opacity-50">
-            {saving ? 'Procesando…' : 'Generar liquidaciones'}
+          <button type="button" onClick={exportCsv} disabled={!rows.length} className="px-4 py-2 rounded-lg bg-surface-container-low text-on-surface font-semibold disabled:opacity-50">Exportar CSV</button>
+          <button type="button" onClick={generate} disabled={!isPastPeriod || saving || !effectiveBrandIds.length} title={!isPastPeriod ? 'Las liquidaciones se generan cuando termina el mes.' : ''} className="px-4 py-2 rounded-lg bg-primary text-on-primary font-semibold disabled:opacity-50">
+            {saving ? 'Procesando…' : 'Generar y exportar liquidaciones'}
           </button>
         </div>}
       </div>
@@ -245,7 +271,25 @@ export default function LiquidacionesPage() {
         {[['report', 'Reporte mensual'], ['ventas', 'Historial de ventas']].map(([key, label]) => <button key={key} type="button" onClick={() => setView(key)} aria-current={view === key ? 'page' : undefined} className={`border-b-2 px-4 py-3 text-sm font-semibold ${view === key ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface'}`}>{label}</button>)}
       </nav>
 
+      {view === 'report' && <section className="grid gap-4 rounded-xl bg-surface-container-lowest p-4 shadow-sm lg:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
+          <label className="text-sm font-medium">Filtrar reporte por<select value={dateFilterMode} onChange={(event) => setDateFilterMode(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2"><option value="month">Mes</option><option value="range">Rango de fechas</option><option value="date">Fecha específica</option></select></label>
+          {dateFilterMode === 'range' ? <><label className="text-sm font-medium">Desde<input required type="date" value={reportStart} onChange={(event) => { setReportStart(event.target.value); if (reportEnd < event.target.value) setReportEnd(event.target.value); }} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label><label className="text-sm font-medium">Hasta<input required type="date" min={reportStart} value={reportEnd} onChange={(event) => setReportEnd(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label></> : dateFilterMode === 'date' ? <label className="text-sm font-medium">Fecha<input required type="date" value={reportStart} onChange={(event) => setReportStart(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label> : <p className="text-xs text-on-surface-variant sm:col-span-1">El mes seleccionado arriba controla el reporte y las liquidaciones.</p>}
+        </div>
+        <div className="space-y-2">
+          <details className="relative">
+            <summary className="cursor-pointer rounded-lg border border-outline-variant px-3 py-2 text-sm font-medium">Marcas: {selectedBrandIds === null ? 'Todas' : `${selectedBrandIds.length} seleccionadas`}</summary>
+            <div className="absolute right-0 z-40 mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-outline-variant bg-white p-3 shadow-xl sm:w-80">
+              <button type="button" onClick={() => setSelectedBrandIds(null)} className="mb-2 text-sm font-semibold text-primary">Seleccionar todas</button>
+              {brands.map((brand) => <label key={brand.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-container-low"><input type="checkbox" checked={effectiveBrandIds.includes(brand.id)} onChange={() => toggleBrandSelection(brand.id)} />{brand.nombre_marca}</label>)}
+            </div>
+          </details>
+          <p className="text-xs text-on-surface-variant">Las fechas filtran el reporte. Las liquidaciones siempre corresponden al mes cerrado seleccionado arriba y se exportan para las marcas elegidas.</p>
+        </div>
+      </section>}
+
       {error && <div role="alert" className="p-3 rounded-lg bg-error-container text-error text-sm">{error}</div>}
+      {notice && <div role="status" className="p-3 rounded-lg bg-primary-fixed text-on-surface text-sm">{notice}</div>}
       {view === 'report' && (loading ? <SplashScreen message="Cargando reportes y liquidaciones..." /> : summary && <>
         <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {[
@@ -271,17 +315,17 @@ export default function LiquidacionesPage() {
 
         <section className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
           <div className="p-5 flex flex-wrap justify-between items-center gap-3 border-b border-surface-container-low">
-            <div><h2 className="font-bold text-on-surface">Liquidaciones por marca</h2><p className="text-xs text-on-surface-variant">{summary.transacciones} ventas registradas</p></div>
+            <div><h2 className="font-bold text-on-surface">Liquidaciones por marca</h2><p className="text-xs text-on-surface-variant">{summary.transacciones} ventas registradas en {report.periodo}; estado de liquidación para {period}.</p></div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative w-full sm:w-64">
-                <label htmlFor="settlement-brand" className="sr-only">Buscar marca para filtrar la liquidación</label>
-                <input id="settlement-brand" type="search" role="combobox" aria-expanded={brandSearchOpen} aria-controls="settlement-brand-results" autoComplete="off" value={brandSearch} onFocus={() => setBrandSearchOpen(true)} onBlur={() => window.setTimeout(() => setBrandSearchOpen(false), 120)} onChange={(event) => { setBrandSearch(event.target.value); setBrandFilter(''); setPreviewBrandId(''); setBrandSearchOpen(true); }} onKeyDown={(event) => { if (event.key === 'Escape') setBrandSearchOpen(false); if (event.key === 'Enter' && brandSuggestions[0]) { event.preventDefault(); selectReportBrand(brandSuggestions[0]); } }} placeholder="Buscar marca..." className="w-full rounded-lg border border-outline-variant px-3 py-2 pr-9 text-sm" />
-                {brandSearch && <button type="button" aria-label="Limpiar búsqueda de marca" onMouseDown={(event) => event.preventDefault()} onClick={() => { setBrandSearch(''); setBrandFilter(''); setPreviewBrandId(''); setBrandSearchOpen(false); }} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-on-surface-variant hover:bg-surface-container-low"><span className="material-symbols-outlined text-base">close</span></button>}
+                <label htmlFor="settlement-brand" className="sr-only">Buscar marca para vista previa</label>
+                <input id="settlement-brand" type="search" role="combobox" aria-expanded={brandSearchOpen} aria-controls="settlement-brand-results" autoComplete="off" value={brandSearch} onFocus={() => setBrandSearchOpen(true)} onBlur={() => window.setTimeout(() => setBrandSearchOpen(false), 120)} onChange={(event) => { setBrandSearch(event.target.value); setPreviewCandidateBrandId(''); setBrandSearchOpen(true); }} onKeyDown={(event) => { if (event.key === 'Escape') setBrandSearchOpen(false); if (event.key === 'Enter' && brandSuggestions[0]) { event.preventDefault(); selectReportBrand(brandSuggestions[0]); } }} placeholder="Buscar marca..." className="w-full rounded-lg border border-outline-variant px-3 py-2 pr-9 text-sm" />
+                {brandSearch && <button type="button" aria-label="Limpiar búsqueda de marca" onMouseDown={(event) => event.preventDefault()} onClick={() => { setBrandSearch(''); setPreviewCandidateBrandId(''); setPreviewBrandId(''); setBrandSearchOpen(false); }} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-on-surface-variant hover:bg-surface-container-low"><span className="material-symbols-outlined text-base">close</span></button>}
                 {brandSearchOpen && brandSearch.trim() && <div id="settlement-brand-results" role="listbox" className="absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-y-auto rounded-xl border border-outline-variant bg-white p-1 shadow-xl">
                   {brandSuggestions.length ? brandSuggestions.map((brand) => <button key={brand.marca_id} type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => selectReportBrand(brand)} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-primary-fixed/40">{brand.marca}</button>) : <p className="px-3 py-2 text-sm text-on-surface-variant">No se encontraron marcas.</p>}
                 </div>}
               </div>
-              <button type="button" onClick={() => setPreviewBrandId(brandFilter)} disabled={!brandFilter} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-on-primary disabled:opacity-50">Vista previa</button>
+              <button type="button" onClick={() => setPreviewBrandId(previewCandidateBrandId)} disabled={!previewCandidateBrandId} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-on-primary disabled:opacity-50">Vista previa</button>
               <div className="flex gap-1">{['Todos', 'Pendiente', 'Pagado'].map((option) => <button key={option} type="button" onClick={() => setFilter(option)} className={`px-3 py-1 rounded-lg text-xs font-semibold ${filter === option ? 'bg-primary text-on-primary' : 'text-on-surface-variant'}`}>{option}</button>)}</div>
             </div>
             <p className="w-full text-right text-xs text-on-surface-variant">Elige una marca para revisar su liquidación y descargarla en Excel.</p>
