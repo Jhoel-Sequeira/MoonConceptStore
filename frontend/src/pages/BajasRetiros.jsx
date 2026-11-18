@@ -303,13 +303,13 @@ export default function BajasRetirosPage() {
       </section>
 
       {modalOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setModalOpen(false); }}>
-        <section role="dialog" aria-modal="true" aria-labelledby="create-retiro-title" className="flex max-h-[94vh] w-full max-w-3xl flex-col overflow-visible rounded-2xl bg-surface-container-lowest shadow-2xl">
+        <section role="dialog" aria-modal="true" aria-labelledby="create-retiro-title" className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl sm:max-h-[calc(100dvh-3rem)]">
           <header className="flex items-start justify-between border-b border-surface-container-low p-5">
             <div><p className="text-xs font-semibold uppercase tracking-widest text-error">Movimiento de salida</p><h2 id="create-retiro-title" className="mt-1 text-xl font-bold text-on-surface">Registrar retiro de mercadería</h2><p className="mt-1 text-sm text-on-surface-variant">El stock se validará y actualizará al guardar.</p></div>
             <button type="button" onClick={() => setModalOpen(false)} disabled={saving} aria-label="Cerrar formulario" className="rounded-lg p-2 text-on-surface-variant hover:bg-surface-container-low"><span className="material-symbols-outlined">close</span></button>
           </header>
-          <form onSubmit={submitRetiro} className="flex min-h-0 flex-col">
-            <div className="flex-1 space-y-5 p-5">
+          <form onSubmit={submitRetiro} className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className={`relative ${brandSuggestionsOpen ? 'z-30' : ''}`}>
                   <label className="text-sm font-medium text-on-surface">Marca que retira
@@ -353,7 +353,7 @@ export default function BajasRetirosPage() {
               </div>
               {formError && <div role="alert" className="rounded-lg bg-error-container p-3 text-sm text-on-error-container">{formError}</div>}
             </div>
-            <footer className="flex flex-col-reverse justify-between gap-3 border-t border-surface-container-low p-4 sm:flex-row sm:items-center">
+            <footer className="flex shrink-0 flex-col-reverse justify-between gap-3 border-t border-surface-container-low bg-surface-container-lowest p-4 sm:flex-row sm:items-center">
               <p className="text-xs text-on-surface-variant">El retiro quedará guardado en el kardex.</p>
               <div className="flex justify-end gap-2"><button type="button" disabled={saving} onClick={() => setModalOpen(false)} className="rounded-lg border border-surface-container-high px-4 py-2 text-sm text-on-surface">Cancelar</button><button type="submit" disabled={saving || !items.length} className="inline-flex items-center gap-2 rounded-lg bg-error px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{saving ? 'Guardando…' : 'Confirmar retiro'}</button></div>
             </footer>
