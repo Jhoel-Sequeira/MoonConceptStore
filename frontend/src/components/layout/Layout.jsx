@@ -25,7 +25,7 @@ function Sidebar({ user, onLogout, open, onClose }) {
   return (
     <>
       {open && <button type="button" aria-label="Cerrar menú" onClick={onClose} className="fixed inset-0 z-40 bg-[#382E29]/35 md:hidden" />}
-      <aside style={{ backgroundColor: '#fff' }} className={`fixed inset-y-0 left-0 z-50 flex h-dvh w-[238px] flex-col overflow-y-auto border-r border-stone-200 !bg-white px-3 py-5 shadow-lg transition-transform max-[700px]:py-3 md:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside style={{ backgroundColor: '#fff' }} className={`sidebar-scrollbar-hidden fixed inset-y-0 left-0 z-50 flex h-dvh w-[238px] flex-col overflow-y-auto border-r border-stone-200 !bg-white px-3 py-5 shadow-lg transition-transform max-[700px]:py-3 md:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
         <div>
           <div className="mb-7 flex flex-col items-center gap-3 px-2 text-center max-[700px]:mb-3 max-[700px]:gap-1.5">
             <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-full border border-stone-200 bg-white max-[700px]:h-10 max-[700px]:w-10">
