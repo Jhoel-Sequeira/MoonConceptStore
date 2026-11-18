@@ -7,6 +7,8 @@ import { SplashScreen } from '../components/ui/FeedbackProvider';
 const localDateParts = (options) => Object.fromEntries(new Intl.DateTimeFormat('en', { timeZone: 'America/Managua', ...options }).formatToParts(new Date()).map(({ type, value }) => [type, value]));
 const currentPeriod = () => { const p = localDateParts({ year: 'numeric', month: '2-digit' }); return `${p.year}-${p.month}`; };
 const todayLocal = () => { const p = localDateParts({ year: 'numeric', month: '2-digit', day: '2-digit' }); return `${p.year}-${p.month}-${p.day}`; };
+const daysInPeriod = (period) => new Date(Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 0)).getUTCDate();
+const currentMonthRange = () => { const period = currentPeriod(); return { desde: `${period}-01`, hasta: `${period}-${daysInPeriod(period)}` }; };
 const initialSalesFilters = () => ({ desde: `${currentPeriod()}-01`, hasta: todayLocal(), marca_id: '', metodo_pago: '', buscar: '' });
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -48,10 +50,9 @@ function buildBrandStatementHtml(brand, period, settlement, productRows, metadat
 }
 
 export default function LiquidacionesPage() {
-  const [period, setPeriod] = useState(currentPeriod());
-  const [dateFilterMode, setDateFilterMode] = useState('month');
-  const [reportStart, setReportStart] = useState(`${currentPeriod()}-01`);
-  const [reportEnd, setReportEnd] = useState(todayLocal());
+  const [initialRange] = useState(currentMonthRange);
+  const [reportStart, setReportStart] = useState(initialRange.desde);
+  const [reportEnd, setReportEnd] = useState(initialRange.hasta);
   const [report, setReport] = useState(null);
   const [settlements, setSettlements] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -73,10 +74,11 @@ export default function LiquidacionesPage() {
   const [salesHistory, setSalesHistory] = useState(null);
   const [salesLoading, setSalesLoading] = useState(false);
   const nowPeriod = currentPeriod();
+  const period = (reportEnd || nowPeriod).slice(0, 7);
   const isPastPeriod = period < nowPeriod;
 
   const refresh = async () => {
-    if (dateFilterMode !== 'month' && (!reportStart || (dateFilterMode === 'range' && (!reportEnd || reportStart > reportEnd)))) {
+    if (!reportStart || !reportEnd || reportStart > reportEnd) {
       setLoading(false);
       setError('Selecciona fechas válidas para el reporte.');
       return;
@@ -84,9 +86,7 @@ export default function LiquidacionesPage() {
     setLoading(true);
     setError('');
     try {
-      const reportFilters = dateFilterMode === 'month'
-        ? { periodo: period }
-        : { desde: reportStart, hasta: dateFilterMode === 'date' ? reportStart : reportEnd };
+      const reportFilters = { desde: reportStart, hasta: reportEnd };
       if (selectedBrandIds !== null) reportFilters.marca_ids = selectedBrandIds;
       const [monthlyReport, monthlySettlements] = await Promise.all([
         finanzasService.obtenerReporte(reportFilters), finanzasService.obtenerLiquidaciones(period),
@@ -99,7 +99,7 @@ export default function LiquidacionesPage() {
       setLoading(false);
     }
   };
-  useEffect(() => { refresh(); }, [period, dateFilterMode, reportStart, reportEnd, selectedBrandIds]);
+  useEffect(() => { refresh(); }, [period, reportStart, reportEnd, selectedBrandIds]);
   useEffect(() => {
     api.get('/marcas/').then(({ data }) => setBrands(Array.isArray(data) ? data : [])).catch(() => setBrands([]));
   }, []);
@@ -245,8 +245,8 @@ export default function LiquidacionesPage() {
         </div>
         {view === 'report' && <div className="border-t border-surface-container-low pt-4">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6 xl:items-end">
-            <label className="text-sm font-medium">Fechas<select value={dateFilterMode} onChange={(event) => setDateFilterMode(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2"><option value="month">Mes</option><option value="range">Rango</option><option value="date">Fecha específica</option></select></label>
-            {dateFilterMode === 'month' ? <label className="text-sm font-medium">Mes<input id="period" type="month" value={period} max={nowPeriod} onChange={(event) => setPeriod(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label> : dateFilterMode === 'range' ? <><label className="text-sm font-medium">Desde<input required type="date" value={reportStart} onChange={(event) => { setReportStart(event.target.value); if (reportEnd < event.target.value) setReportEnd(event.target.value); }} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label><label className="text-sm font-medium">Hasta<input required type="date" min={reportStart} value={reportEnd} onChange={(event) => setReportEnd(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label><label className="text-sm font-medium">Mes de liquidación<input id="period" type="month" value={period} max={nowPeriod} onChange={(event) => setPeriod(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label></> : <><label className="text-sm font-medium">Fecha<input required type="date" value={reportStart} onChange={(event) => setReportStart(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label><label className="text-sm font-medium">Mes de liquidación<input id="period" type="month" value={period} max={nowPeriod} onChange={(event) => setPeriod(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label></>}
+            <label className="text-sm font-medium">Desde<input required type="date" value={reportStart} onChange={(event) => { setReportStart(event.target.value); if (reportEnd < event.target.value) setReportEnd(event.target.value); }} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label>
+            <label className="text-sm font-medium">Hasta<input required type="date" min={reportStart} value={reportEnd} onChange={(event) => setReportEnd(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label>
             <details className="relative text-sm">
               <summary className="cursor-pointer rounded-lg border border-outline-variant px-3 py-2">Marcas: {selectedBrandIds === null ? 'Todas' : `${selectedBrandIds.length} seleccionadas`}</summary>
               <div className="absolute left-0 z-40 mt-1 max-h-72 w-72 overflow-y-auto rounded-xl border border-outline-variant bg-white p-3 shadow-xl">
@@ -257,7 +257,7 @@ export default function LiquidacionesPage() {
             <label className="text-sm font-medium">Estado<select value={filter} onChange={(event) => setFilter(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2"><option>Todos</option><option>Pendiente</option><option>Pagado</option></select></label>
             <div className="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-2"><button type="button" onClick={exportCsv} disabled={!rows.length} className="rounded-lg bg-surface-container-low px-4 py-2 font-semibold text-on-surface disabled:opacity-50">Exportar CSV</button><button type="button" onClick={generate} disabled={!isPastPeriod || saving || !effectiveBrandIds.length} title={!isPastPeriod ? 'Las liquidaciones se generan cuando termina el mes.' : ''} className="rounded-lg bg-primary px-4 py-2 font-semibold text-on-primary disabled:opacity-50">{saving ? 'Procesando…' : 'Generar y exportar'}</button></div>
           </div>
-          <p className="mt-3 text-xs text-on-surface-variant">Las fechas y marcas filtran el reporte. Las liquidaciones se generan por mes cerrado y para las marcas elegidas.</p>
+          <p className="mt-3 text-xs text-on-surface-variant">El reporte usa el rango y las marcas elegidas. Las liquidaciones mensuales corresponden al mes de la fecha Hasta.</p>
         </div>}
       </div>
 
