@@ -19,10 +19,6 @@
   }
 }
 
-::-webkit-scrollbar {
-  display: none;
-}
-
 .login-screen {
   background: radial-gradient(ellipse at 14% 12%, rgba(233,183,195,.58) 0, transparent 34%),
     radial-gradient(ellipse at 90% 88%, rgba(201,164,109,.18) 0, transparent 28%), #F3E2D9;
