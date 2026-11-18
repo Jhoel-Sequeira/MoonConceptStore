@@ -1,9 +1,12 @@
 import calendar
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from io import BytesIO
+import unicodedata
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
+from openpyxl import load_workbook
 from sqlalchemy import Date, cast, func, or_, text
 from sqlalchemy.orm import Session, joinedload
 
@@ -42,7 +45,109 @@ def _paid(renta: Renta) -> Decimal:
     return sum((Decimal(str(payment.monto_pagado or 0)) for payment in renta.pagos), Decimal("0.00"))
 
 
+def _brand_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.strip().casefold())
+    return " ".join("".join(char for char in normalized if not unicodedata.combining(char)).split())
+
+
 class RentaService:
+    @staticmethod
+    def import_configurations(db: Session, content: bytes) -> dict:
+        try:
+            try:
+                workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+            except Exception as exc:
+                raise ValueError("No se pudo leer el archivo Excel.") from exc
+            sheet = workbook.active
+            header_row = next(sheet.iter_rows(values_only=True), None)
+            if not header_row:
+                raise ValueError("La plantilla está vacía.")
+            headers = [str(value or "").strip().casefold() for value in header_row]
+            required = {"nombre_marca", "monto_mensual", "dia_vencimiento", "fecha_inicio", "fecha_fin", "activa"}
+            if not required.issubset(headers):
+                raise ValueError("La plantilla debe incluir nombre_marca, monto_mensual, dia_vencimiento, fecha_inicio, fecha_fin y activa.")
+            columns = {name: headers.index(name) for name in required}
+            rows = []
+            for row_number, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+                values = (*values, *(None for _ in range(max(0, len(headers) - len(values)))))
+                if not any(value is not None for value in values):
+                    continue
+                try:
+                    brand_name = str(values[columns["nombre_marca"]] or "").strip()
+                    amount = Decimal(str(values[columns["monto_mensual"]]))
+                    due_value = Decimal(str(values[columns["dia_vencimiento"]]))
+                    if not due_value.is_finite() or due_value != due_value.to_integral_value():
+                        raise ValueError("el día de vencimiento debe ser un entero")
+                    due_day = int(due_value)
+                    start = values[columns["fecha_inicio"]]
+                    end = values[columns["fecha_fin"]]
+                    active = values[columns["activa"]]
+                    start = start.date() if isinstance(start, datetime) else start
+                    end = end.date() if isinstance(end, datetime) else end
+                    if isinstance(start, str):
+                        start = date.fromisoformat(start)
+                    if isinstance(end, str) and end.strip():
+                        end = date.fromisoformat(end)
+                    elif not end:
+                        end = None
+                    if isinstance(active, str):
+                        active_value = active.strip().casefold()
+                        if active_value not in {"true", "1", "si", "sí", "activo", "false", "0", "no", "inactivo"}:
+                            raise ValueError("activa debe ser verdadero o falso")
+                        active = active_value in {"true", "1", "si", "sí", "activo"}
+                    elif active in (0, 1):
+                        active = bool(active)
+                    if not brand_name or not amount.is_finite() or amount <= 0 or due_day < 1 or due_day > 31 or not isinstance(start, date):
+                        raise ValueError("nombre, monto, día de vencimiento o fecha de inicio inválidos")
+                    if end and (not isinstance(end, date) or end < start):
+                        raise ValueError("fecha de fin anterior al inicio o inválida")
+                    if not isinstance(active, bool):
+                        raise ValueError("activa debe ser verdadero o falso")
+                    rows.append({"nombre": brand_name, "key": _brand_key(brand_name), "monto": amount,
+                                 "dia": due_day, "inicio": start, "fin": end, "activa": active,
+                                 "fila": row_number})
+                except (ValueError, TypeError, ArithmeticError) as exc:
+                    raise ValueError(f"Fila {row_number}: {exc}") from exc
+            if not rows:
+                raise ValueError("La plantilla no contiene configuraciones para importar.")
+            keys = [row["key"] for row in rows]
+            if len(keys) != len(set(keys)):
+                raise ValueError("La plantilla repite una marca.")
+            brands = db.query(Marca).all()
+            brand_map = {}
+            for brand in brands:
+                key = _brand_key(brand.nombre_marca)
+                if key in brand_map:
+                    raise ValueError(f"Hay marcas con nombres duplicados que impiden identificar '{brand.nombre_marca}'.")
+                brand_map[key] = brand
+            unmatched = [row["nombre"] for row in rows if row["key"] not in brand_map]
+            if unmatched:
+                raise ValueError("No se encontraron estas marcas: " + ", ".join(unmatched))
+            configs = {config.marca_id: config for config in db.query(RentaConfig).all()}
+            created = updated = 0
+            for row in rows:
+                brand_id = brand_map[row["key"]].id
+                config = configs.get(brand_id)
+                if config is None:
+                    config = RentaConfig(marca_id=brand_id)
+                    db.add(config)
+                    created += 1
+                else:
+                    updated += 1
+                config.monto_mensual = row["monto"]
+                config.dia_vencimiento = row["dia"]
+                config.fecha_inicio = row["inicio"]
+                config.fecha_fin = row["fin"]
+                config.activa = row["activa"]
+            db.commit()
+            return {"creadas": created, "actualizadas": updated, "total": len(rows)}
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            if "workbook" in locals():
+                workbook.close()
+
     @staticmethod
     def list_for_period(db: Session, period: str) -> dict:
         first, last = _period(period)

@@ -18,6 +18,7 @@ export default function RentaPage() {
   const [data, setData] = useState(null);
   const [brands, setBrands] = useState([]);
   const [config, setConfig] = useState(blankConfig());
+  const [configMode, setConfigMode] = useState(null);
   const [paymentFor, setPaymentFor] = useState(null);
   const [payment, setPayment] = useState({ monto_pagado: '', fecha_pago: localDate(), referencia_pago: '', comentario: '' });
   const [rentSearch, setRentSearch] = useState('');
@@ -26,6 +27,24 @@ export default function RentaPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+
+  const importTemplate = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await rentaService.importarConfiguraciones(file);
+      setMessage(`Plantilla importada: ${result.creadas} configuraciones nuevas y ${result.actualizadas} actualizadas.`);
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'No se pudo importar la plantilla de renta.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -46,13 +65,26 @@ export default function RentaPage() {
 
   useEffect(() => { load(); }, [period]);
 
-  const selectBrand = (brandId) => {
-    const saved = data?.configuraciones.find((item) => String(item.marca_id) === brandId);
-    setConfig(saved ? {
+  const openCreateConfig = () => {
+    setConfig(blankConfig());
+    setConfigMode('create');
+    setError('');
+    setMessage('');
+  };
+
+  const openEditConfig = (saved) => {
+    setConfig({
       marca_id: String(saved.marca_id), monto_mensual: String(saved.monto_mensual),
       dia_vencimiento: String(saved.dia_vencimiento), fecha_inicio: saved.fecha_inicio,
       fecha_fin: saved.fecha_fin || '', activa: saved.activa,
-    } : { ...blankConfig(), marca_id: brandId });
+    });
+    setConfigMode('edit');
+    setError('');
+    setMessage('');
+  };
+
+  const closeConfig = () => {
+    if (!saving) setConfigMode(null);
   };
 
   const saveConfig = async (event) => {
@@ -61,12 +93,17 @@ export default function RentaPage() {
     setError('');
     setMessage('');
     try {
+      if (configMode === 'create' && configurations.some((item) => String(item.marca_id) === config.marca_id)) {
+        setError('Esta marca ya tiene una renta configurada. Abre Editar para modificarla.');
+        return;
+      }
       await rentaService.guardarConfiguracion({
         marca_id: Number(config.marca_id), monto_mensual: Number(config.monto_mensual),
         dia_vencimiento: Number(config.dia_vencimiento), fecha_inicio: config.fecha_inicio,
         fecha_fin: config.fecha_fin || null, activa: config.activa,
       });
-      setMessage('Se guardó la renta mensual de la marca.');
+      setConfigMode(null);
+      setMessage(configMode === 'create' ? 'Se creó la renta mensual de la marca.' : 'Se actualizaron los datos de la renta.');
       await load();
     } catch (err) {
       setError(err.response?.data?.detail || 'No se pudo guardar la configuración.');
@@ -110,9 +147,10 @@ export default function RentaPage() {
     }
   };
 
-  const resetConfig = () => setConfig(blankConfig());
   const summary = data?.resumen || { monto_total: 0, total_pagado: 0, saldo_pendiente: 0, saldo_vencido: 0, vencidas_total: 0, por_vencer: 0 };
   const configurations = data?.configuraciones || [];
+  const availableBrands = brands.filter((brand) => !configurations.some((item) => String(item.marca_id) === String(brand.id)));
+  const selectedBrandName = brands.find((brand) => String(brand.id) === config.marca_id)?.nombre_marca || '';
   const rentRows = (data?.rentas || []).filter((row) => {
     const matchesStatus = rentStatus === 'Todas' || row.estado === rentStatus;
     const term = rentSearch.trim().toLowerCase();
@@ -140,8 +178,20 @@ export default function RentaPage() {
   return <section className="w-full min-w-0 space-y-6">
     <header className="flex flex-col justify-between gap-3 rounded-xl bg-surface-container-lowest p-5 shadow-sm sm:flex-row sm:items-center">
       <div><h1 className="text-xl font-semibold tracking-tight text-on-surface">Renta mensual del colectivo</h1><p className="mt-1 text-sm text-on-surface-variant">Configura cuánto paga cada marca, genera los cobros del mes y registra sus abonos.</p></div>
-      <div className="flex flex-wrap items-center gap-2"><label htmlFor="rent-period" className="text-sm font-medium">Mes</label><input id="rent-period" type="month" max={maxMonth} value={period} onChange={(event) => setPeriod(event.target.value)} className="rounded-lg border border-stone-200 p-2" /><button type="button" disabled={saving || loading} onClick={generate} className="rounded-lg bg-primary px-4 py-2.5 font-semibold text-white disabled:opacity-50">{saving ? 'Procesando…' : `Generar rentas de ${period}`}</button><button type="button" disabled={!rentRows.length} onClick={exportCsv} className="rounded-lg border border-stone-200 px-4 py-2.5 font-semibold disabled:opacity-50">Exportar CSV</button></div>
+      <div className="flex flex-wrap items-center gap-2"><label htmlFor="rent-period" className="text-sm font-medium">Mes</label><input id="rent-period" type="month" max={maxMonth} value={period} onChange={(event) => setPeriod(event.target.value)} className="rounded-lg border border-stone-200 p-2" /><label className="cursor-pointer rounded-lg border border-stone-200 px-4 py-2.5 font-semibold">{saving ? 'Procesando…' : 'Importar plantilla Excel'}<input type="file" accept=".xlsx" className="hidden" disabled={saving || loading} onChange={importTemplate} /></label><button type="button" disabled={saving || loading} onClick={generate} className="rounded-lg bg-primary px-4 py-2.5 font-semibold text-white disabled:opacity-50">{saving ? 'Procesando…' : `Generar rentas de ${period}`}</button><button type="button" disabled={!rentRows.length} onClick={exportCsv} className="rounded-lg border border-stone-200 px-4 py-2.5 font-semibold disabled:opacity-50">Exportar CSV</button></div>
     </header>
+
+    {configMode && <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) closeConfig(); }}>
+      <form onSubmit={saveConfig} onKeyDown={(event) => { if (event.key === 'Escape') closeConfig(); }} role="dialog" aria-modal="true" aria-labelledby="rent-config-title" className="max-h-[90vh] w-full max-w-2xl space-y-4 overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+        <div className="flex items-start justify-between gap-4"><div><h2 id="rent-config-title" className="text-xl font-bold">{configMode === 'create' ? 'Crear renta mensual' : 'Editar renta mensual'}</h2><p className="mt-1 text-sm text-on-surface-variant">Define monto, vencimiento y vigencia del contrato.</p></div><button type="button" onClick={closeConfig} disabled={saving} aria-label="Cerrar" className="rounded-lg border border-stone-200 px-3 py-2 disabled:opacity-50">×</button></div>
+        {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+        {configMode === 'create' ? <label htmlFor="rent-brand" className="block text-sm font-medium">Marca<select id="rent-brand" required value={config.marca_id} onChange={(event) => setConfig({ ...config, marca_id: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5"><option value="">Selecciona una marca sin renta</option>{availableBrands.map((brand) => <option key={brand.id} value={brand.id}>{brand.nombre_marca}{brand.estado_id !== 2 ? ' (inactiva)' : ''}</option>)}</select>{!availableBrands.length && <span className="mt-1 block text-xs text-on-surface-variant">Todas las marcas ya tienen una configuración.</span>}</label> : <div className="rounded-lg bg-stone-50 p-3 text-sm"><span className="text-on-surface-variant">Marca</span><p className="mt-1 font-semibold">{selectedBrandName}</p></div>}
+        <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm font-medium">Monto mensual (C$)<input required min="0.01" step="0.01" type="number" value={config.monto_mensual} onChange={(event) => setConfig({ ...config, monto_mensual: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label><label className="text-sm font-medium">Día de vencimiento<input required min="1" max="31" step="1" type="number" value={config.dia_vencimiento} onChange={(event) => setConfig({ ...config, dia_vencimiento: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label><label className="text-sm font-medium">Inicio del cobro<input required type="date" value={config.fecha_inicio} onChange={(event) => setConfig({ ...config, fecha_inicio: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label><label className="text-sm font-medium">Fin del contrato<input type="date" min={config.fecha_inicio} value={config.fecha_fin} onChange={(event) => setConfig({ ...config, fecha_fin: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label></div>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={config.activa} onChange={(event) => setConfig({ ...config, activa: event.target.checked })} />Contrato activo</label>
+        <p className="text-xs text-on-surface-variant">Al desactivar un contrato sin fecha final, se usará hoy como fecha de fin. Editar actualiza la configuración de la marca.</p>
+        <div className="flex justify-end gap-2"><button type="button" onClick={closeConfig} disabled={saving} className="rounded-lg border border-stone-200 px-4 py-2.5 font-semibold disabled:opacity-50">Cancelar</button><button disabled={saving || (configMode === 'create' && !config.marca_id)} className="rounded-lg bg-primary px-4 py-2.5 font-semibold text-white disabled:opacity-50">{saving ? 'Guardando…' : configMode === 'create' ? 'Crear renta' : 'Guardar cambios'}</button></div>
+      </form>
+    </div>}
 
     {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
     {message && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{message}</div>}
@@ -158,16 +208,13 @@ export default function RentaPage() {
       ].map(([label, value]) => <article key={label} className="rounded-2xl bg-white p-5 shadow-sm"><p className="text-sm text-on-surface-variant">{label}</p><p className={`mt-2 text-2xl font-bold ${label.includes('Saldo') ? 'text-primary' : ''}`}>{formatCordobas(value)}</p></article>)}
     </div>
 
-    <form onSubmit={saveConfig} className="grid gap-3 rounded-2xl bg-white p-5 shadow-sm sm:grid-cols-2 xl:grid-cols-6 xl:items-end">
-      <div className="xl:col-span-2"><label htmlFor="rent-brand" className="text-sm font-medium">Marca</label><select id="rent-brand" required value={config.marca_id} onChange={(event) => selectBrand(event.target.value)} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5"><option value="">Selecciona marca</option>{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.nombre_marca}{brand.estado_id !== 2 ? ' (inactiva)' : ''}</option>)}</select></div>
-      <label className="text-sm font-medium">Monto mensual (C$)<input required min="0.01" step="0.01" type="number" value={config.monto_mensual} onChange={(event) => setConfig({ ...config, monto_mensual: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label>
-      <label className="text-sm font-medium">Día de vencimiento<input required min="1" max="31" step="1" type="number" value={config.dia_vencimiento} onChange={(event) => setConfig({ ...config, dia_vencimiento: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label>
-      <label className="text-sm font-medium">Inicio del cobro<input required type="date" value={config.fecha_inicio} onChange={(event) => setConfig({ ...config, fecha_inicio: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label>
-      <label className="text-sm font-medium">Fin del contrato<input type="date" min={config.fecha_inicio} value={config.fecha_fin} onChange={(event) => setConfig({ ...config, fecha_fin: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label>
-      <div className="flex items-center gap-2 xl:col-span-2"><input id="rent-active" type="checkbox" checked={config.activa} onChange={(event) => setConfig({ ...config, activa: event.target.checked })} /><label htmlFor="rent-active" className="text-sm">Contrato activo</label></div>
-      <div className="flex gap-2 xl:col-span-4 xl:justify-end"><button type="button" onClick={resetConfig} className="rounded-lg border border-stone-200 px-4 py-2.5 font-semibold">Limpiar</button><button disabled={saving || !config.marca_id} className="rounded-lg bg-primary px-4 py-2.5 font-semibold text-white disabled:opacity-50">{saving ? 'Guardando…' : 'Guardar renta mensual'}</button></div>
-      <p className="text-xs text-on-surface-variant sm:col-span-2 xl:col-span-6">Se cobra el monto mensual completo por cada mes dentro de la vigencia. Al desactivar un contrato sin fecha final, se usa hoy como fecha de fin.</p>
-    </form>
+    <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-stone-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div><h2 className="font-semibold">Tarifas mensuales por marca</h2><p className="mt-1 text-xs text-on-surface-variant">Crea una renta para una marca nueva o edita su configuración actual.</p></div>
+        <button type="button" disabled={loading || saving || !availableBrands.length} onClick={openCreateConfig} className="rounded-lg bg-primary px-4 py-2.5 font-semibold text-white disabled:opacity-50">Crear renta</button>
+      </div>
+      {loading ? <SplashScreen compact message="Cargando contratos..." /> : !configurations.length ? <p className="p-6 text-sm text-on-surface-variant">Aún no hay rentas configuradas. Usa Crear renta para comenzar.</p> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-stone-50 text-xs uppercase text-stone-500"><tr><th className="px-5 py-3">Marca</th><th className="px-5 py-3 text-right">Monto mensual</th><th className="px-5 py-3">Vencimiento</th><th className="px-5 py-3">Vigencia</th><th className="px-5 py-3">Contrato</th><th className="px-5 py-3"></th></tr></thead><tbody className="divide-y divide-stone-100">{configurations.map((item) => <tr key={item.id}><td className="px-5 py-4 font-semibold">{item.marca}</td><td className="px-5 py-4 text-right">{formatCordobas(item.monto_mensual)}</td><td className="px-5 py-4">Día {item.dia_vencimiento}</td><td className="px-5 py-4">{item.fecha_inicio}{item.fecha_fin ? ` — ${item.fecha_fin}` : ' en curso'}</td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${item.activa ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-100 text-stone-600'}`}>{item.activa ? 'Activo' : 'Finalizado'}</span></td><td className="px-5 py-4 text-right"><button type="button" disabled={saving} onClick={() => openEditConfig(item)} className="rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold disabled:opacity-50">Editar</button></td></tr>)}</tbody></table></div>}
+    </div>
 
     <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
       <div className="flex flex-col gap-3 border-b border-stone-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="font-semibold">Cobros de {period}</h2><p className="mt-1 text-xs text-on-surface-variant">Los abonos se descuentan del saldo y conservan su referencia.</p></div><div className="flex flex-wrap gap-2"><label className="sr-only" htmlFor="rent-search">Buscar marca o referencia</label><input id="rent-search" value={rentSearch} onChange={(event) => setRentSearch(event.target.value)} placeholder="Marca o referencia" className="rounded-lg border border-stone-200 px-3 py-2 text-sm" /><label className="sr-only" htmlFor="rent-status">Filtrar por estado</label><select id="rent-status" value={rentStatus} onChange={(event) => setRentStatus(event.target.value)} className="rounded-lg border border-stone-200 px-3 py-2 text-sm"><option>Todas</option><option>Pendiente</option><option>Parcial</option><option>Vencida</option><option>Pagada</option></select></div></div>
@@ -176,7 +223,6 @@ export default function RentaPage() {
       </tr>)}{!rentRows.length && <tr><td colSpan="7" className="p-8 text-center text-on-surface-variant">No hay cobros que coincidan con los filtros.</td></tr>}</tbody></table></div>}
     </div>
 
-    <div className="overflow-hidden rounded-2xl bg-white shadow-sm"><div className="border-b border-stone-100 px-5 py-4"><h2 className="font-semibold">Tarifas mensuales por marca</h2></div>{loading ? <SplashScreen compact message="Cargando contratos..." /> : !configurations.length ? <p className="p-6 text-sm text-on-surface-variant">Aún no hay rentas mensuales configuradas.</p> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-stone-50 text-xs uppercase text-stone-500"><tr><th className="px-5 py-3">Marca</th><th className="px-5 py-3 text-right">Monto mensual</th><th className="px-5 py-3">Vencimiento</th><th className="px-5 py-3">Vigencia</th><th className="px-5 py-3">Contrato</th><th className="px-5 py-3"></th></tr></thead><tbody className="divide-y divide-stone-100">{configurations.map((item) => <tr key={item.id}><td className="px-5 py-4 font-semibold">{item.marca}</td><td className="px-5 py-4 text-right">{formatCordobas(item.monto_mensual)}</td><td className="px-5 py-4">Día {item.dia_vencimiento}</td><td className="px-5 py-4">{item.fecha_inicio}{item.fecha_fin ? ` — ${item.fecha_fin}` : ' en curso'}</td><td className="px-5 py-4">{item.activa ? 'Activo' : 'Finalizado'}</td><td className="px-5 py-4 text-right"><button type="button" onClick={() => selectBrand(String(item.marca_id))} className="rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold">Editar</button></td></tr>)}</tbody></table></div>}</div>
 
     {paymentFor && <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4"><form onSubmit={savePayment} className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-xl"><div><h2 className="text-xl font-bold">Registrar abono</h2><p className="mt-1 text-sm text-on-surface-variant">{paymentFor.marca} · saldo {formatCordobas(paymentFor.saldo)}</p></div><label className="block text-sm font-medium">Monto recibido (C$)<input required min="0.01" max={paymentFor.saldo} step="0.01" type="number" value={payment.monto_pagado} onChange={(event) => setPayment({ ...payment, monto_pagado: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label><label className="block text-sm font-medium">Fecha del pago<input required max={localDate()} type="date" value={payment.fecha_pago} onChange={(event) => setPayment({ ...payment, fecha_pago: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label><label className="block text-sm font-medium">Referencia / comprobante<input required maxLength={255} value={payment.referencia_pago} onChange={(event) => setPayment({ ...payment, referencia_pago: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" placeholder="Número de transferencia o recibo" /></label><label className="block text-sm font-medium">Comentario opcional<input maxLength={1000} value={payment.comentario} onChange={(event) => setPayment({ ...payment, comentario: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label><div className="flex justify-end gap-2"><button type="button" onClick={() => setPaymentFor(null)} className="rounded-lg border px-4 py-2">Cancelar</button><button disabled={saving} className="rounded-lg bg-primary px-4 py-2 font-semibold text-white disabled:opacity-50">{saving ? 'Guardando…' : 'Guardar abono'}</button></div></form></div>}
   </section>;
