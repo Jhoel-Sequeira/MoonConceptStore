@@ -238,33 +238,32 @@ export default function LiquidacionesPage() {
   const comparison = report?.comparacion_mes_anterior;
   return (
     <div className="flex flex-col w-full gap-space-lg">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-surface-container-lowest p-space-lg rounded-xl shadow-sm">
+      <div className="flex flex-col gap-4 bg-surface-container-lowest p-space-lg rounded-xl shadow-sm">
         <div>
           <h1 className="font-headline-md text-headline-md text-on-surface">{view === 'report' ? 'Reportes y liquidaciones' : 'Historial de ventas'}</h1>
           <p className="text-sm text-on-surface-variant">Ventas por período y liquidación mensual por marca.</p>
         </div>
+        {view === 'report' && <div className="border-t border-surface-container-low pt-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6 xl:items-end">
+            <label className="text-sm font-medium">Fechas<select value={dateFilterMode} onChange={(event) => setDateFilterMode(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2"><option value="month">Mes</option><option value="range">Rango</option><option value="date">Fecha específica</option></select></label>
+            {dateFilterMode === 'month' ? <label className="text-sm font-medium">Mes<input id="period" type="month" value={period} max={nowPeriod} onChange={(event) => setPeriod(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label> : dateFilterMode === 'range' ? <><label className="text-sm font-medium">Desde<input required type="date" value={reportStart} onChange={(event) => { setReportStart(event.target.value); if (reportEnd < event.target.value) setReportEnd(event.target.value); }} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label><label className="text-sm font-medium">Hasta<input required type="date" min={reportStart} value={reportEnd} onChange={(event) => setReportEnd(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label><label className="text-sm font-medium">Mes de liquidación<input id="period" type="month" value={period} max={nowPeriod} onChange={(event) => setPeriod(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label></> : <><label className="text-sm font-medium">Fecha<input required type="date" value={reportStart} onChange={(event) => setReportStart(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label><label className="text-sm font-medium">Mes de liquidación<input id="period" type="month" value={period} max={nowPeriod} onChange={(event) => setPeriod(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label></>}
+            <details className="relative text-sm">
+              <summary className="cursor-pointer rounded-lg border border-outline-variant px-3 py-2">Marcas: {selectedBrandIds === null ? 'Todas' : `${selectedBrandIds.length} seleccionadas`}</summary>
+              <div className="absolute left-0 z-40 mt-1 max-h-72 w-72 overflow-y-auto rounded-xl border border-outline-variant bg-white p-3 shadow-xl">
+                <button type="button" onClick={() => setSelectedBrandIds(null)} className="mb-2 text-sm font-semibold text-primary">Seleccionar todas</button>
+                {brands.map((brand) => <label key={brand.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-surface-container-low"><input type="checkbox" checked={effectiveBrandIds.includes(brand.id)} onChange={() => toggleBrandSelection(brand.id)} />{brand.nombre_marca}</label>)}
+              </div>
+            </details>
+            <label className="text-sm font-medium">Estado<select value={filter} onChange={(event) => setFilter(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2"><option>Todos</option><option>Pendiente</option><option>Pagado</option></select></label>
+            <div className="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-2"><button type="button" onClick={exportCsv} disabled={!rows.length} className="rounded-lg bg-surface-container-low px-4 py-2 font-semibold text-on-surface disabled:opacity-50">Exportar CSV</button><button type="button" onClick={generate} disabled={!isPastPeriod || saving || !effectiveBrandIds.length} title={!isPastPeriod ? 'Las liquidaciones se generan cuando termina el mes.' : ''} className="rounded-lg bg-primary px-4 py-2 font-semibold text-on-primary disabled:opacity-50">{saving ? 'Procesando…' : 'Generar y exportar'}</button></div>
+          </div>
+          <p className="mt-3 text-xs text-on-surface-variant">Las fechas y marcas filtran el reporte. Las liquidaciones se generan por mes cerrado y para las marcas elegidas.</p>
+        </div>}
       </div>
 
       <nav className="flex gap-2 border-b border-surface-container-high" aria-label="Sección de reportes">
         {[['report', 'Reporte mensual'], ['ventas', 'Historial de ventas']].map(([key, label]) => <button key={key} type="button" onClick={() => setView(key)} aria-current={view === key ? 'page' : undefined} className={`border-b-2 px-4 py-3 text-sm font-semibold ${view === key ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface'}`}>{label}</button>)}
       </nav>
-
-      {view === 'report' && <section className="rounded-xl bg-surface-container-lowest p-4 shadow-sm">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6 xl:items-end">
-          <label className="text-sm font-medium">Fechas<select value={dateFilterMode} onChange={(event) => setDateFilterMode(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2"><option value="month">Mes</option><option value="range">Rango</option><option value="date">Fecha específica</option></select></label>
-          {dateFilterMode === 'month' ? <label className="text-sm font-medium">Mes<input id="period" type="month" value={period} max={nowPeriod} onChange={(event) => setPeriod(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label> : dateFilterMode === 'range' ? <><label className="text-sm font-medium">Desde<input required type="date" value={reportStart} onChange={(event) => { setReportStart(event.target.value); if (reportEnd < event.target.value) setReportEnd(event.target.value); }} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label><label className="text-sm font-medium">Hasta<input required type="date" min={reportStart} value={reportEnd} onChange={(event) => setReportEnd(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label><label className="text-sm font-medium">Mes de liquidación<input id="period" type="month" value={period} max={nowPeriod} onChange={(event) => setPeriod(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label></> : <><label className="text-sm font-medium">Fecha<input required type="date" value={reportStart} onChange={(event) => setReportStart(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label><label className="text-sm font-medium">Mes de liquidación<input id="period" type="month" value={period} max={nowPeriod} onChange={(event) => setPeriod(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2" /></label></>}
-          <details className="relative text-sm">
-            <summary className="cursor-pointer rounded-lg border border-outline-variant px-3 py-2">Marcas: {selectedBrandIds === null ? 'Todas' : `${selectedBrandIds.length} seleccionadas`}</summary>
-            <div className="absolute left-0 z-40 mt-1 max-h-72 w-72 overflow-y-auto rounded-xl border border-outline-variant bg-white p-3 shadow-xl">
-              <button type="button" onClick={() => setSelectedBrandIds(null)} className="mb-2 text-sm font-semibold text-primary">Seleccionar todas</button>
-              {brands.map((brand) => <label key={brand.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-surface-container-low"><input type="checkbox" checked={effectiveBrandIds.includes(brand.id)} onChange={() => toggleBrandSelection(brand.id)} />{brand.nombre_marca}</label>)}
-            </div>
-          </details>
-          <label className="text-sm font-medium">Estado<select value={filter} onChange={(event) => setFilter(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2"><option>Todos</option><option>Pendiente</option><option>Pagado</option></select></label>
-          <div className="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-2"><button type="button" onClick={exportCsv} disabled={!rows.length} className="rounded-lg bg-surface-container-low px-4 py-2 font-semibold text-on-surface disabled:opacity-50">Exportar CSV</button><button type="button" onClick={generate} disabled={!isPastPeriod || saving || !effectiveBrandIds.length} title={!isPastPeriod ? 'Las liquidaciones se generan cuando termina el mes.' : ''} className="rounded-lg bg-primary px-4 py-2 font-semibold text-on-primary disabled:opacity-50">{saving ? 'Procesando…' : 'Generar y exportar'}</button></div>
-        </div>
-        <p className="mt-3 text-xs text-on-surface-variant">Las fechas y marcas filtran el reporte. Las liquidaciones se generan por mes cerrado y para las marcas elegidas.</p>
-      </section>}
 
       {error && <div role="alert" className="p-3 rounded-lg bg-error-container text-error text-sm">{error}</div>}
       {notice && <div role="status" className="p-3 rounded-lg bg-primary-fixed text-on-surface text-sm">{notice}</div>}
