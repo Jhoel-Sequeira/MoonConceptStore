@@ -321,7 +321,7 @@ class InventarioService:
             # ponytail: Pillow 10.1+ supplies a scalable built-in font when OS fonts are unavailable.
             return ImageFont.load_default(size=size), True
 
-        detail_font, detail_fallback = load_label_font(regular_paths, 30)
+        detail_font, detail_fallback = load_label_font(bold_paths, 30)
         price_font, price_fallback = load_label_font(bold_paths, 44)
 
         width, height = 900, 720
@@ -336,8 +336,8 @@ class InventarioService:
         detail_size = 30
         while detail_size > 24 and draw.textbbox((0, 0), sku_label, font=detail_font)[2] > 760:
             detail_size -= 2
-            detail_font, detail_fallback = load_label_font(regular_paths, detail_size)
-        draw.text((center_x, 510), sku_label, fill="#555555", font=detail_font, anchor="mt")
+            detail_font, detail_fallback = load_label_font(bold_paths, detail_size)
+        draw.text((center_x, 510), sku_label, fill="#111111", font=detail_font, anchor="mt", stroke_width=1 if detail_fallback else 0, stroke_fill="#111111")
         draw.text((center_x, 570), f"C$ {price:,.2f}" if price is not None else "", fill="#111111", font=price_font, anchor="mt", stroke_width=1 if price_fallback else 0, stroke_fill="#111111")
         img = card
         buf = io.BytesIO()
