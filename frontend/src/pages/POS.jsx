@@ -707,9 +707,23 @@ export default function POSPage() {
           <div className="bg-surface-container-lowest rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-4">
             <h3 className="font-bold text-lg text-on-surface">Seleccionar Método de Pago</h3>
             <div className="text-center py-2 bg-surface-container-low rounded-xl">
-              <span className="text-xs text-on-surface-variant">Subtotal de productos</span>
+              <span className="text-xs text-on-surface-variant">Total con descuentos</span>
               <div className="font-bold text-2xl text-primary font-mono">{formatCordobas(subtotal)}</div>
             </div>
+            <section aria-label="Descuentos por producto" className="rounded-xl border border-surface-container-high p-3">
+              <h4 className="mb-2 text-sm font-semibold text-on-surface">Descuento por producto</h4>
+              <div className="flex max-h-48 flex-col gap-2 overflow-y-auto">
+                {cart.map((item) => (
+                  <label key={item.id} className="flex items-center gap-2 text-xs text-on-surface-variant">
+                    <span className="min-w-0 flex-1 truncate">{item.nombre}</span>
+                    <input aria-label={`Descuento para ${item.nombre}`} type="number" min="0" max={item.descuentoTipo === 'porcentaje' ? 100 : Number(item.precio) || undefined} step="0.01" value={item.descuentoValor} disabled={processingSale} onChange={(event) => updateLinePricing(item.id, 'descuentoValor', event.target.value)} className="w-20 rounded-md border border-surface-container-high bg-white px-2 py-1.5 text-right text-sm text-on-surface" />
+                    <select aria-label={`Tipo de descuento para ${item.nombre}`} value={item.descuentoTipo} disabled={processingSale} onChange={(event) => updateLinePricing(item.id, 'descuentoTipo', event.target.value)} className="rounded-md border border-surface-container-high bg-white px-2 py-1.5 text-sm text-on-surface">
+                      <option value="porcentaje">%</option><option value="fijo">C$ / ud.</option>
+                    </select>
+                  </label>
+                ))}
+              </div>
+            </section>
             <div className="flex flex-col gap-2">
               <button
                 disabled={processingSale}
