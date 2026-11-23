@@ -32,6 +32,10 @@ def _calculate_line_amounts(unit_price: Decimal, quantity: int, fixed_discount: 
 
 class POSService:
     @staticmethod
+    def _managua_iso(value):
+        return value.replace(tzinfo=timezone.utc).astimezone(MANAGUA).isoformat() if value else None
+
+    @staticmethod
     def list_sales(
         db: Session,
         start_date: date | None = None,
@@ -137,6 +141,123 @@ class POSService:
         """), {"rate": rate}).scalar_one()
         db.commit()
         return {"comision_tarjeta_porcentaje": value}
+
+    @staticmethod
+    def list_returnable_sales(db: Session, search: str | None = None, page: int = 1, page_size: int = 25) -> dict:
+        where = ["e.modulo = 'ventas'", "e.nombre = 'Facturada'",
+                 "NOT EXISTS (SELECT 1 FROM devoluciones_venta r WHERE r.venta_id = v.id)"]
+        params = {"limit": page_size, "offset": (page - 1) * page_size}
+        if search and search.strip():
+            where.append("""(
+                v.id::text ILIKE :search OR lpad(v.id::text, 6, '0') ILIKE :search
+                OR COALESCE(c.nombre_cliente, '') ILIKE :search
+                OR EXISTS (SELECT 1 FROM venta_detalles sx JOIN productos sp ON sp.id = sx.producto_id
+                           WHERE sx.venta_id = v.id AND (sp.nombre ILIKE :search OR COALESCE(sp.sku, '') ILIKE :search))
+            )""")
+            params["search"] = f"%{search.strip()}%"
+        clause = " AND ".join(where)
+        total = db.execute(text(f"""
+            SELECT count(*) FROM ventas v
+            JOIN estados e ON e.id = v.estado_id
+            LEFT JOIN clientes c ON c.id = v.cliente_id
+            WHERE {clause}
+        """), params).scalar_one()
+        rows = db.execute(text(f"""
+            SELECT v.id, v.fecha_venta, v.total,
+                   COALESCE(c.nombre_cliente, 'Consumidor Final') AS cliente,
+                   mp.metodo_pago,
+                   COALESCE((
+                     SELECT jsonb_agg(jsonb_build_object(
+                       'producto_id', vd.producto_id, 'producto', p.nombre, 'sku', p.sku,
+                       'cantidad', vd.cantidad, 'precio_unitario', vd.precio_unitario,
+                       'descuento', vd.descuento, 'subtotal', vd.subtotal
+                     ) ORDER BY p.nombre)
+                     FROM venta_detalles vd JOIN productos p ON p.id = vd.producto_id
+                     WHERE vd.venta_id = v.id
+                   ), '[]'::jsonb) AS items
+            FROM ventas v
+            JOIN estados e ON e.id = v.estado_id
+            JOIN metodo_pago mp ON mp.id = v.metodo_pago_id
+            LEFT JOIN clientes c ON c.id = v.cliente_id
+            WHERE {clause}
+            ORDER BY v.fecha_venta DESC, v.id DESC
+            LIMIT :limit OFFSET :offset
+        """), params).mappings().all()
+        sales = [dict(row) for row in rows]
+        for sale in sales:
+            sale["fecha_venta"] = POSService._managua_iso(sale["fecha_venta"])
+        return {"pagina": page, "por_pagina": page_size, "total": int(total), "ventas": sales}
+
+    @staticmethod
+    def list_returns(db: Session, search: str | None = None, page: int = 1, page_size: int = 25) -> dict:
+        where = ["1 = 1"]
+        params = {"limit": page_size, "offset": (page - 1) * page_size}
+        if search and search.strip():
+            where.append("""(
+                r.venta_id::text ILIKE :search OR lpad(r.venta_id::text, 6, '0') ILIKE :search
+                OR c.nombre_cliente ILIKE :search
+                OR EXISTS (SELECT 1 FROM devoluciones_venta_detalles d JOIN productos p ON p.id=d.producto_id
+                           WHERE d.devolucion_id=r.id AND (p.nombre ILIKE :search OR COALESCE(p.sku, '') ILIKE :search))
+            )""")
+            params["search"] = f"%{search.strip()}%"
+        clause = " AND ".join(where)
+        total = db.execute(text(f"""
+            SELECT count(*) FROM devoluciones_venta r
+            JOIN ventas v ON v.id = r.venta_id LEFT JOIN clientes c ON c.id = v.cliente_id
+            WHERE {clause}
+        """), params).scalar_one()
+        rows = db.execute(text(f"""
+            SELECT r.id, r.venta_id, r.fecha_devolucion, r.motivo, r.monto_reembolso,
+                   r.metodo_reembolso, r.estado_reembolso, r.reembolsado_en,
+                   r.reembolso_referencia, COALESCE(c.nombre_cliente, 'Consumidor Final') AS cliente,
+                   COALESCE(u.nombre, '') AS registrado_por,
+                   COALESCE(ru.nombre, '') AS reembolso_registrado_por,
+                   COALESCE((
+                     SELECT jsonb_agg(jsonb_build_object(
+                       'producto_id', d.producto_id, 'producto', p.nombre,
+                       'cantidad', d.cantidad, 'monto_devuelto', d.monto_devuelto
+                     ) ORDER BY p.nombre)
+                     FROM devoluciones_venta_detalles d JOIN productos p ON p.id = d.producto_id
+                     WHERE d.devolucion_id = r.id
+                   ), '[]'::jsonb) AS items
+            FROM devoluciones_venta r
+            JOIN ventas v ON v.id = r.venta_id
+            LEFT JOIN clientes c ON c.id = v.cliente_id
+            LEFT JOIN usuarios u ON u.id = r.registrado_por
+            LEFT JOIN usuarios ru ON ru.id = r.reembolso_registrado_por
+            WHERE {clause}
+            ORDER BY r.fecha_devolucion DESC, r.id DESC
+            LIMIT :limit OFFSET :offset
+        """), params).mappings().all()
+        returns = [dict(row) for row in rows]
+        for item in returns:
+            item["fecha_devolucion"] = POSService._managua_iso(item["fecha_devolucion"])
+            item["reembolsado_en"] = POSService._managua_iso(item["reembolsado_en"])
+        return {"pagina": page, "por_pagina": page_size, "total": int(total), "devoluciones": returns}
+
+    @staticmethod
+    def register_return(db: Session, sale_id: int, reason: str, user_id: int) -> dict:
+        try:
+            result = db.execute(text("""
+                SELECT internal.registrar_devolucion_venta(:sale_id, :reason, :user_id)
+            """), {"sale_id": sale_id, "reason": reason, "user_id": user_id}).scalar_one()
+            db.commit()
+            return result
+        except Exception:
+            db.rollback()
+            raise
+
+    @staticmethod
+    def confirm_refund(db: Session, return_id: int, reference: str, user_id: int) -> dict:
+        try:
+            result = db.execute(text("""
+                SELECT internal.confirmar_reembolso(:return_id, :reference, :user_id)
+            """), {"return_id": return_id, "reference": reference, "user_id": user_id}).scalar_one()
+            db.commit()
+            return result
+        except Exception:
+            db.rollback()
+            raise
 
     @staticmethod
     def create_sale(db: Session, sale_in: VentaCreate, user_id: int) -> dict:

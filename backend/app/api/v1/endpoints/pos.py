@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.usuarios import Usuario
-from app.schemas.pos import POSCommissionConfig, VentaCreate, VentaResponse
+from app.schemas.pos import (
+    DevolucionVentaCreate,
+    POSCommissionConfig,
+    ReembolsoVentaConfirm,
+    VentaCreate,
+    VentaResponse,
+)
 from app.services.pos_service import POSService
 
 
@@ -40,6 +46,57 @@ def sales_history(
     db: Session = Depends(get_db),
 ):
     return POSService.list_sales(db, desde, hasta, marca_id, metodo_pago, buscar, pagina, por_pagina)
+
+
+@router.get("/devoluciones/pendientes")
+def returnable_sales(
+    buscar: str | None = Query(default=None, max_length=100),
+    pagina: int = Query(default=1, ge=1),
+    por_pagina: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    return POSService.list_returnable_sales(db, buscar, pagina, por_pagina)
+
+
+@router.get("/devoluciones/historial")
+def returns_history(
+    buscar: str | None = Query(default=None, max_length=100),
+    pagina: int = Query(default=1, ge=1),
+    por_pagina: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    return POSService.list_returns(db, buscar, pagina, por_pagina)
+
+
+def _database_error_detail(exc: Exception) -> str:
+    original = getattr(exc, "orig", None)
+    diagnostic = getattr(original, "diag", None)
+    return getattr(diagnostic, "message_primary", None) or "No se pudo completar la operación. Revisa el estado de la factura y vuelve a intentar."
+
+
+@router.post("/devoluciones")
+def register_return(
+    payload: DevolucionVentaCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    try:
+        return POSService.register_return(db, payload.venta_id, payload.motivo, current_user.id)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_database_error_detail(exc)) from exc
+
+
+@router.post("/devoluciones/{devolucion_id}/reembolso")
+def confirm_refund(
+    devolucion_id: int,
+    payload: ReembolsoVentaConfirm,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    try:
+        return POSService.confirm_refund(db, devolucion_id, payload.referencia, current_user.id)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_database_error_detail(exc)) from exc
 
 
 @router.post("/ventas", response_model=VentaResponse, status_code=status.HTTP_201_CREATED)

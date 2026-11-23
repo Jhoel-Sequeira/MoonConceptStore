@@ -7,6 +7,7 @@ import { inventarioService } from '../../services/inventarioService';
 const navItems = [
   { name: 'Inicio', path: '/', icon: 'home' },
   { name: 'Ventas', path: '/pos', icon: 'point_of_sale' },
+  { name: 'Devoluciones', path: '/devoluciones', icon: 'assignment_return' },
   { name: 'Inventario', path: '/inventario', icon: 'inventory_2' },
   { name: 'Clientes', path: '/clientes', icon: 'group' },
   { name: 'Marcas', path: '/marcas', icon: 'loyalty' },

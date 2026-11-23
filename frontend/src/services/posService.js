@@ -8,7 +8,11 @@ const posService = {
     crearVenta: async (ventaData) => {
         const response = await api.post('/pos/ventas', ventaData);
         return response.data;
-    }
+    },
+    getReturnableSales: async (params) => (await api.get('/pos/devoluciones/pendientes', { params })).data,
+    getReturns: async (params) => (await api.get('/pos/devoluciones/historial', { params })).data,
+    registerReturn: async (payload) => (await api.post('/pos/devoluciones', payload)).data,
+    confirmRefund: async (id, payload) => (await api.post(`/pos/devoluciones/${id}/reembolso`, payload)).data,
 };
 
 export default posService;

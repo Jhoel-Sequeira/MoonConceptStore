@@ -10,6 +10,7 @@ import InventarioPage from './pages/Inventario';
 import RecepcionPage from './pages/Recepcion';
 import BajasRetirosPage from './pages/BajasRetiros';
 import POSPage from './pages/POS';
+import DevolucionesPage from './pages/Devoluciones';
 import CierreCajaPage from './pages/CierreCaja';
 import LiquidacionesPage from './pages/Liquidaciones';
 import RentaPage from './pages/Renta';
@@ -64,6 +65,7 @@ export default function App() {
               <Route path="/recepcion" element={<RecepcionPage />} />
               <Route path="/bajas-retiros" element={<BajasRetirosPage />} />
               <Route path="/pos" element={<POSPage />} />
+              <Route path="/devoluciones" element={<DevolucionesPage />} />
               <Route path="/cierre-caja" element={<CierreCajaPage />} />
               <Route path="/liquidaciones" element={<LiquidacionesPage />} />
               <Route path="/renta" element={<RentaPage />} />

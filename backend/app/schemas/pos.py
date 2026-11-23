@@ -44,3 +44,12 @@ class VentaResponse(BaseModel):
 
 class POSCommissionConfig(BaseModel):
     comision_tarjeta_porcentaje: Decimal = Field(ge=0, le=100, max_digits=5, decimal_places=2)
+
+
+class DevolucionVentaCreate(BaseModel):
+    venta_id: int = Field(gt=0)
+    motivo: str = Field(min_length=5, max_length=1000)
+
+
+class ReembolsoVentaConfirm(BaseModel):
+    referencia: str = Field(min_length=3, max_length=120)
