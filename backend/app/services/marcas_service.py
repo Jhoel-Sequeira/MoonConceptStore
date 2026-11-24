@@ -136,6 +136,10 @@ def _extract_in_cell_images(file_bytes: bytes, sheet_name: str, row_start: int, 
     except (KeyError, StopIteration, ValueError, ET.ParseError, zipfile.BadZipFile):
         return {}
 
+def _net_brand_sales(sales, returns):
+    return Decimal(str(sales or 0)) - Decimal(str(returns or 0))
+
+
 class MarcasService:
     @staticmethod
     def get_all(db: Session) -> List[dict]:
@@ -176,7 +180,7 @@ class MarcasService:
             banco = cuenta.banco if cuenta else None
             no_cuenta = cuenta.no_cuenta if cuenta else None
             sku_count = sku_counts.get(m.id, 0)
-            sales_sum = sales_by_brand.get(m.id, 0.0) - returns_by_brand.get(m.id, 0.0)
+            sales_sum = _net_brand_sales(sales_by_brand.get(m.id), returns_by_brand.get(m.id))
 
             results.append({
                 "id": m.id,
@@ -230,7 +234,7 @@ class MarcasService:
                 AND v.fecha_venta < date_trunc('month', CURRENT_DATE) + interval '1 month'
             """),
             {"marca_id": m.id}
-        ).scalar() or 0.0
+        ).scalar()
         returns_sum = db.execute(text("""
             SELECT COALESCE(sum(d.monto_devuelto),0)
             FROM devoluciones_venta r
@@ -241,8 +245,8 @@ class MarcasService:
             WHERE p.marca_id=:marca_id
               AND r.fecha_devolucion >= date_trunc('month', CURRENT_DATE)
               AND r.fecha_devolucion < date_trunc('month', CURRENT_DATE) + interval '1 month'
-        """), {"marca_id": m.id}).scalar() or 0.0
-        sales_sum -= returns_sum
+        """), {"marca_id": m.id}).scalar()
+        sales_sum = _net_brand_sales(sales_sum, returns_sum)
 
         return {
             "id": m.id,
