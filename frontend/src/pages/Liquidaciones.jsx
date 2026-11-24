@@ -23,7 +23,7 @@ function buildBrandStatementHtml(brand, period, settlement, productRows, metadat
   const productTable = productRows.map((item, index) => `<tr>
     <td class="number">${index + 1}</td><td>${escapeHtml(item.sku || '—')}</td><td><strong>${escapeHtml(item.producto)}</strong></td><td class="number">${escapeHtml(item.cantidad)}</td>
     <td class="number">${money(item.bruto)}</td><td class="number">${money(item.metodos.efectivo)}</td>
-    <td class="number">${money(item.metodos.tarjeta)}</td><td class="number">${money(item.metodos.transferencia)}</td>
+    <td class="number">${money(item.metodos.tarjeta)}</td><td class="number">${money(item.metodos.transferencia)}</td><td class="number">${money(item.metodos.cuenta_marca)}</td>
     <td class="number">${money(item.comision_pos)}</td>
     <td class="number net">${money(item.neto_marca)}</td>
   </tr>`).join('');
@@ -42,9 +42,9 @@ function buildBrandStatementHtml(brand, period, settlement, productRows, metadat
     <header class="hero"><div><div class="eyebrow">Moon Concept Store · Colectivo</div><h1>${escapeHtml(brand.marca)}</h1><p>Estado de cuenta mensual de ventas</p></div><div class="period"><span>Período liquidado</span><strong>${escapeHtml(period)}</strong></div></header>
     <section class="brand-data"><div><span class="label">Marca</span><span>${escapeHtml(brand.marca)}</span></div><div><span class="label">Código</span><span>${escapeHtml(metadata.codigo || '—')}</span></div><div><span class="label">Categoría</span><span>${escapeHtml(metadata.categoria || 'General')}</span></div><div><span class="label">Representante</span><span>${escapeHtml(metadata.nombre_representante || '—')}</span></div><div><span class="label">Correo</span><span>${escapeHtml(metadata.email || '—')}</span></div><div><span class="label">Teléfono</span><span>${escapeHtml(metadata.telefono || '—')}</span></div></section>
     <div class="statusbar"><div><div class="label">Estado de liquidación</div><div class="status-text">${escapeHtml(paymentInfo)}</div></div><span class="status">${escapeHtml(status)}</span></div>
-    <section class="cards"><article class="card"><small>Ventas brutas</small><strong>${money(brand.ventas_brutas)}</strong></article><article class="card net"><small>Neto para la marca</small><strong>${money(brand.neto_pagar)}</strong></article><article class="card"><small>Comisión terminal POS · a cargo de la marca</small><strong>${money(brand.comision_pos)}</strong></article></section>
+    <section class="cards"><article class="card"><small>Ventas brutas</small><strong>${money(brand.ventas_brutas)}</strong></article><article class="card"><small>Compras descontadas</small><strong>${money(brand.total_deducciones_marca)}</strong></article><article class="card net"><small>Neto para la marca</small><strong>${money(brand.neto_pagar)}</strong></article><article class="card"><small>Comisión terminal POS · a cargo de la marca</small><strong>${money(brand.comision_pos)}</strong></article></section>
     <div class="section-head"><div><h2>Detalle de productos</h2><p>Unidades vendidas: ${escapeHtml(brand.cantidad)}</p></div><p>Montos en córdobas</p></div>
-    <table><thead><tr><th class="number">#</th><th>SKU / código</th><th>Producto</th><th class="number">Unidades</th><th class="number">Bruto</th><th class="number">Efectivo</th><th class="number">Tarjeta</th><th class="number">Transferencia</th><th class="number">POS</th><th class="number">Neto marca</th></tr></thead><tbody>${productTable || '<tr><td colspan="10">No hay detalle de productos en este período.</td></tr>'}</tbody></table>
+    <table><thead><tr><th class="number">#</th><th>SKU / código</th><th>Producto</th><th class="number">Unidades</th><th class="number">Bruto</th><th class="number">Efectivo</th><th class="number">Tarjeta</th><th class="number">Transferencia</th><th class="number">Cuenta marca</th><th class="number">POS</th><th class="number">Neto marca</th></tr></thead><tbody>${productTable || '<tr><td colspan="11">No hay detalle de productos en este período.</td></tr>'}</tbody></table>
     <footer class="foot"><span><strong>Moon Concept Store</strong><br>Reporte preparado para ${escapeHtml(brand.marca)} · ${escapeHtml(todayLocal())}</span><span>La comisión POS se deduce del neto correspondiente a la marca.</span></footer>
     </main></body></html>`;
 }
@@ -182,9 +182,9 @@ export default function LiquidacionesPage() {
 
   const exportCsv = () => {
     if (!report || !rows.length) return;
-    const columns = ['Período del reporte', 'Marca', 'Unidades', 'Ventas brutas', 'Neto marca', 'Comisión terminal POS', 'Efectivo', 'Tarjeta', 'Transferencia', 'Estado', 'Fecha pago', 'Referencia'];
-    const values = rows.map((row) => [report.periodo, row.marca, row.cantidad, row.ventas_brutas, row.neto_pagar, row.comision_pos,
-      row.por_metodo.efectivo, row.por_metodo.tarjeta, row.por_metodo.transferencia,
+    const columns = ['Período del reporte', 'Marca', 'Unidades', 'Ventas brutas', 'Compras descontadas', 'Neto marca', 'Comisión terminal POS', 'Efectivo', 'Tarjeta', 'Transferencia', 'Cuenta de marca', 'Estado', 'Fecha pago', 'Referencia'];
+    const values = rows.map((row) => [report.periodo, row.marca, row.cantidad, row.ventas_brutas, row.total_deducciones_marca, row.neto_pagar, row.comision_pos,
+      row.por_metodo.efectivo, row.por_metodo.tarjeta, row.por_metodo.transferencia, row.por_metodo.cuenta_marca,
       row.settlement?.estado || 'Sin liquidar', row.settlement?.fecha_pago || '', row.settlement?.referencia_pago || '']);
     const csv = [columns, ...values].map((line) => line.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
     const link = document.createElement('a');
@@ -268,10 +268,10 @@ export default function LiquidacionesPage() {
       {error && <div role="alert" className="p-3 rounded-lg bg-error-container text-error text-sm">{error}</div>}
       {notice && <div role="status" className="p-3 rounded-lg bg-primary-fixed text-on-surface text-sm">{notice}</div>}
       {view === 'report' && (loading ? <SplashScreen message="Cargando reportes y liquidaciones..." /> : summary && <>
-        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {[
             ['Ventas de productos', summary.ventas_brutas],
-            ['Neto de marcas, después de comisión POS', summary.neto_marcas], ['Comisión POS a cargo de las marcas', summary.comision_pos],
+            ['Neto de marcas después de compras', summary.neto_marcas], ['Comisión POS a cargo de las marcas', summary.comision_pos], ['Compras cargadas a liquidación', summary.deducciones_compras],
           ].map(([label, amount]) => <article key={label} className="bg-surface-container-lowest rounded-xl p-5 shadow-sm">
             <div className="text-xs uppercase tracking-wide text-on-surface-variant">{label}</div>
             <div className="text-2xl font-bold mt-2 text-on-surface">{formatCordobas(amount)}</div>
@@ -284,9 +284,9 @@ export default function LiquidacionesPage() {
           <article className="bg-surface-container-lowest rounded-xl p-5 shadow-sm"><p className="text-xs uppercase text-on-surface-variant">Transacciones vs. mes anterior</p><p className="mt-2 text-xl font-bold">{comparison.variacion_transacciones >= 0 ? '+' : ''}{comparison.variacion_transacciones}</p><p className="text-xs text-on-surface-variant">{comparison.transacciones_anterior} transacciones el mes anterior</p></article>
         </section>}
 
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {[
-            ['Cobrado en efectivo', summary.cobrado_efectivo], ['Cobrado con tarjeta', summary.cobrado_tarjeta], ['Cobrado por transferencia', summary.cobrado_transferencia],
+          ['Cobrado en efectivo', summary.cobrado_efectivo], ['Cobrado con tarjeta', summary.cobrado_tarjeta], ['Cobrado por transferencia', summary.cobrado_transferencia], ['Ventas a cuenta de marca', summary.venta_a_cuenta_marca],
           ].map(([label, amount]) => <div key={label} className="bg-surface-container-lowest rounded-xl p-4 shadow-sm flex justify-between gap-2"><span className="text-sm text-on-surface-variant">{label}</span><b>{formatCordobas(amount)}</b></div>)}
         </section>
 
@@ -294,16 +294,17 @@ export default function LiquidacionesPage() {
           <div className="border-b border-surface-container-low p-5"><h2 className="font-bold text-on-surface">Liquidaciones por marca</h2><p className="text-xs text-on-surface-variant">{summary.transacciones} ventas en {report.periodo}; estado mensual de {period}.</p></div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead><tr className="bg-surface-container-low text-xs uppercase text-on-surface-variant"><th className="p-3">Marca</th><th className="p-3 text-right">Unidades</th><th className="p-3 text-right">Bruto</th><th className="p-3 text-right">Neto a pagar</th><th className="p-3">Estado</th><th className="p-3">Pago / referencia</th></tr></thead>
+              <thead><tr className="bg-surface-container-low text-xs uppercase text-on-surface-variant"><th className="p-3">Marca</th><th className="p-3 text-right">Unidades</th><th className="p-3 text-right">Bruto</th><th className="p-3 text-right">Compras descontadas</th><th className="p-3 text-right">Neto a pagar</th><th className="p-3">Estado</th><th className="p-3">Pago / referencia</th></tr></thead>
               <tbody className="divide-y divide-surface-container-low">
                 {rows.map((row) => <tr key={row.marca_id}>
                   <td className="p-3 font-semibold">{row.marca}</td><td className="p-3 text-right">{row.cantidad}</td>
                   <td className="p-3 text-right">{formatCordobas(row.ventas_brutas)}</td>
+                  <td className="p-3 text-right">{formatCordobas(row.total_deducciones_marca)}</td>
                   <td className="p-3 text-right font-bold">{formatCordobas(row.neto_pagar)}</td>
                   <td className="p-3">{row.settlement?.estado || 'Sin liquidar'}</td>
                   <td className="p-3">{row.settlement?.estado === 'Pagado' ? <span>{row.settlement.fecha_pago}<br /><small>{row.settlement.referencia_pago}</small></span> : row.settlement ? <button type="button" onClick={() => setSelected(row.settlement)} className="px-3 py-1 rounded bg-primary text-on-primary text-xs font-semibold">Registrar pago</button> : '—'}</td>
                 </tr>)}
-                {!rows.length && <tr><td colSpan="6" className="p-6 text-center text-on-surface-variant">No hay marcas con ventas en este período.</td></tr>}
+                {!rows.length && <tr><td colSpan="7" className="p-6 text-center text-on-surface-variant">No hay marcas con ventas en este período.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -319,9 +320,9 @@ export default function LiquidacionesPage() {
 
         <section className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
           <div className="p-5 border-b border-surface-container-low"><h2 className="font-bold text-on-surface">Ventas por producto y método</h2><p className="text-xs text-on-surface-variant">El cliente paga el precio del artículo; la comisión POS se descuenta del neto de la marca.</p></div>
-          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="bg-surface-container-low text-xs uppercase text-on-surface-variant"><th className="p-3">Marca</th><th className="p-3">Producto</th><th className="p-3 text-right">Unidades</th><th className="p-3 text-right">Bruto</th><th className="p-3 text-right">Efectivo</th><th className="p-3 text-right">Tarjeta</th><th className="p-3 text-right">Transferencia</th><th className="p-3 text-right">POS</th></tr></thead><tbody className="divide-y divide-surface-container-low">
-            {(report.por_producto || []).map((item) => <tr key={`${item.marca_id}-${item.producto_id}`}><td className="p-3">{item.marca}</td><td className="p-3 font-medium">{item.producto}</td><td className="p-3 text-right">{item.cantidad}</td><td className="p-3 text-right">{formatCordobas(item.bruto)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.efectivo)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.tarjeta)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.transferencia)}</td><td className="p-3 text-right">{formatCordobas(item.comision_pos)}</td></tr>)}
-            {!report.por_producto?.length && <tr><td colSpan="8" className="p-6 text-center text-on-surface-variant">Sin ventas de productos en este mes.</td></tr>}
+          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="bg-surface-container-low text-xs uppercase text-on-surface-variant"><th className="p-3">Marca</th><th className="p-3">Producto</th><th className="p-3 text-right">Unidades</th><th className="p-3 text-right">Bruto</th><th className="p-3 text-right">Efectivo</th><th className="p-3 text-right">Tarjeta</th><th className="p-3 text-right">Transferencia</th><th className="p-3 text-right">Cuenta de marca</th><th className="p-3 text-right">POS</th></tr></thead><tbody className="divide-y divide-surface-container-low">
+            {(report.por_producto || []).map((item) => <tr key={`${item.marca_id}-${item.producto_id}`}><td className="p-3">{item.marca}</td><td className="p-3 font-medium">{item.producto}</td><td className="p-3 text-right">{item.cantidad}</td><td className="p-3 text-right">{formatCordobas(item.bruto)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.efectivo)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.tarjeta)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.transferencia)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.cuenta_marca)}</td><td className="p-3 text-right">{formatCordobas(item.comision_pos)}</td></tr>)}
+            {!report.por_producto?.length && <tr><td colSpan="9" className="p-6 text-center text-on-surface-variant">Sin ventas de productos en este mes.</td></tr>}
           </tbody></table></div>
         </section>
       </>)}

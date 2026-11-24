@@ -82,7 +82,7 @@ class POSService:
         """
         summary = db.execute(text(f"""
             SELECT count(*) AS transacciones,
-                   COALESCE(sum(v.total - COALESCE((SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id),0)), 0) AS total_cobrado,
+                   COALESCE(sum(CASE WHEN v.descontar_de_liquidacion THEN 0 ELSE v.total - COALESCE((SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id),0) END), 0) AS total_cobrado,
                    COALESCE(sum((SELECT COALESCE(sum(vd.subtotal), 0) FROM venta_detalles vd WHERE vd.venta_id = v.id)
                      - COALESCE((SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id),0)), 0) AS ventas_productos,
                    COALESCE(sum(v.comision_pos), 0) AS comision_pos
@@ -334,6 +334,22 @@ class POSService:
             if not payment:
                 raise ValueError("El método de pago seleccionado no está configurado")
 
+            if sale_in.descontar_de_liquidacion and not sale_in.marca_cliente_id:
+                raise ValueError("Selecciona la marca para cargar la compra a su liquidación")
+            if sale_in.descontar_de_liquidacion and payment.metodo_pago.strip().casefold() != "cuenta de marca":
+                raise ValueError("Las compras descontadas de liquidación deben facturarse a cuenta de marca")
+            if payment.metodo_pago.strip().casefold() == "cuenta de marca" and not sale_in.descontar_de_liquidacion:
+                raise ValueError("La cuenta de marca requiere activar el descuento de liquidación")
+
+            brand = None
+            if sale_in.marca_cliente_id:
+                brand = db.execute(
+                    text("SELECT id, nombre_marca FROM marcas WHERE id = :id"),
+                    {"id": sale_in.marca_cliente_id},
+                ).mappings().first()
+                if not brand:
+                    raise ValueError("La marca seleccionada ya no existe")
+
             subtotal = total
             rate_percent = db.execute(text("SELECT comision_tarjeta_porcentaje FROM pos_config WHERE id = 1")).scalar_one()
             commission = (
@@ -344,7 +360,18 @@ class POSService:
             # ponytail: la marca absorbe la comisión; el cliente solo paga el subtotal de productos.
             total = subtotal
 
-            if sale_in.cliente_id:
+            if brand:
+                customer_name = brand["nombre_marca"]
+                customer_id = db.execute(
+                    text("SELECT id FROM clientes WHERE lower(trim(nombre_cliente)) = lower(:name) ORDER BY id LIMIT 1"),
+                    {"name": customer_name},
+                ).scalar()
+                if customer_id is None:
+                    customer_id = db.execute(
+                        text("INSERT INTO clientes (nombre_cliente) VALUES (:name) RETURNING id"),
+                        {"name": customer_name},
+                    ).scalar_one()
+            elif sale_in.cliente_id:
                 customer = db.execute(
                     text("SELECT id, nombre_cliente FROM clientes WHERE id = :id"),
                     {"id": sale_in.cliente_id},
@@ -374,8 +401,10 @@ class POSService:
 
             sale_id = db.execute(
                 text("""
-                    INSERT INTO ventas (usuario_id, cliente_id, metodo_pago_id, total, comision_pos, estado_id)
-                    VALUES (:user_id, :customer_id, :payment_id, :total, :commission, :state_id)
+                    INSERT INTO ventas (usuario_id, cliente_id, metodo_pago_id, total, comision_pos, estado_id,
+                                        marca_cliente_id, descontar_de_liquidacion)
+                    VALUES (:user_id, :customer_id, :payment_id, :total, :commission, :state_id,
+                            :brand_id, :deduct_from_settlement)
                     RETURNING id
                 """),
                 {
@@ -385,8 +414,16 @@ class POSService:
                     "total": total,
                     "commission": commission,
                     "state_id": invoice_state_id,
+                    "brand_id": brand["id"] if brand else None,
+                    "deduct_from_settlement": sale_in.descontar_de_liquidacion,
                 },
             ).scalar_one()
+
+            if sale_in.descontar_de_liquidacion:
+                db.execute(text("""
+                    INSERT INTO cargos_marca (venta_id, marca_id, monto)
+                    VALUES (:sale_id, :brand_id, :amount)
+                """), {"sale_id": sale_id, "brand_id": brand["id"], "amount": total})
 
             db.execute(
                 text("""

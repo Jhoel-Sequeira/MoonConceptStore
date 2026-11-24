@@ -15,6 +15,8 @@ class VentaItemCreate(BaseModel):
 class VentaCreate(BaseModel):
     cliente_id: Optional[int] = Field(default=None, gt=0)
     cliente: Optional[str] = Field(default=None, max_length=255)
+    marca_cliente_id: Optional[int] = Field(default=None, gt=0)
+    descontar_de_liquidacion: bool = False
     metodo_pago: str = Field(min_length=1, max_length=100)
     items: List[VentaItemCreate] = Field(min_length=1, max_length=100)
 

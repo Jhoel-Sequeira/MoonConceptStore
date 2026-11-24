@@ -97,6 +97,23 @@ class LiquidacionesService:
             WHERE r.fecha_devolucion >= :start AND r.fecha_devolucion < :end
             ORDER BY r.id,p.marca_id,d.producto_id
         """), {"start": start, "end": end}).mappings().all()
+        charge_rows = db.execute(text("""
+            SELECT c.marca_id, m.nombre_marca,
+                   COALESCE(sum(c.monto) FILTER (WHERE c.creado_en >= :start AND c.creado_en < :end), 0) AS compras_periodo,
+                   (SELECT l.total_deducciones_marca FROM liquidaciones l
+                    WHERE l.marca_id=c.marca_id AND l.periodo_inicio=:first AND l.periodo_fin=:last
+                    LIMIT 1) AS deducciones_liquidacion,
+                   COALESCE(sum(c.monto - COALESCE((
+                     SELECT sum(a.monto_aplicado)
+                     FROM liquidacion_cargos_marca a
+                     WHERE a.cargo_id=c.id
+                   ), 0)), 0) AS descuentos_pendientes
+            FROM cargos_marca c
+            JOIN marcas m ON m.id=c.marca_id
+            WHERE c.creado_en < :end
+            GROUP BY c.marca_id
+        """), {"start": start, "end": end, "first": first, "last": last}).mappings().all()
+        charges_by_brand = {row["marca_id"]: row for row in charge_rows}
 
         sales = {}
         products = {}
@@ -113,17 +130,17 @@ class LiquidacionesService:
             brand = brand_map.setdefault(row["marca_id"], {
                 "marca_id": row["marca_id"], "marca": row["nombre_marca"],
                 "ventas_brutas": Decimal("0"), "cantidad": 0,
-                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0")},
+                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "cuenta_marca": Decimal("0")},
                 "comision_pos": Decimal("0"),
             })
             method = str(row["metodo_pago"]).strip().lower()
-            method_key = "tarjeta" if method == "tarjeta" else "transferencia" if method == "transferencia" else "efectivo"
+            method_key = "cuenta_marca" if method == "cuenta de marca" else "tarjeta" if method == "tarjeta" else "transferencia" if method == "transferencia" else "efectivo"
             key = (row["marca_id"], row["producto_id"])
             item = products.setdefault(key, {
                 "marca_id": row["marca_id"], "marca": row["nombre_marca"],
                 "producto_id": row["producto_id"], "producto": row["nombre"], "sku": row["sku"],
                 "cantidad": 0, "bruto": Decimal("0"),
-                "metodos": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0")},
+                "metodos": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "cuenta_marca": Decimal("0")},
                 "comision_pos": Decimal("0"),
             })
             item["cantidad"] += int(row["cantidad"])
@@ -145,7 +162,7 @@ class LiquidacionesService:
             brand = brand_map.setdefault(row["marca_id"], {
                 "marca_id": row["marca_id"], "marca": row["nombre_marca"],
                 "ventas_brutas": Decimal("0"), "cantidad": 0,
-                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0")},
+                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "cuenta_marca": Decimal("0")},
                 "comision_pos": Decimal("0"),
             })
             key = (row["marca_id"], row["producto_id"])
@@ -153,11 +170,11 @@ class LiquidacionesService:
                 "marca_id": row["marca_id"], "marca": row["nombre_marca"],
                 "producto_id": row["producto_id"], "producto": row["nombre"], "sku": row["sku"],
                 "cantidad": 0, "bruto": Decimal("0"),
-                "metodos": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0")},
+                "metodos": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "cuenta_marca": Decimal("0")},
                 "comision_pos": Decimal("0"),
             })
             method = str(row["metodo_reembolso"]).strip().lower()
-            method_key = "tarjeta" if method == "tarjeta" else "transferencia" if method == "transferencia" else "efectivo"
+            method_key = "cuenta_marca" if method == "cuenta de marca" else "tarjeta" if method == "tarjeta" else "transferencia" if method == "transferencia" else "efectivo"
             brand["ventas_brutas"] -= line_amount
             brand["cantidad"] -= quantity
             brand["por_metodo"][method_key] -= line_amount
@@ -169,6 +186,14 @@ class LiquidacionesService:
             day["ventas_brutas"] -= line_amount
             day["cantidad"] -= quantity
 
+        for charge in charge_rows:
+            brand_map.setdefault(charge["marca_id"], {
+                "marca_id": charge["marca_id"], "marca": charge["nombre_marca"],
+                "ventas_brutas": Decimal("0"), "cantidad": 0,
+                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "cuenta_marca": Decimal("0")},
+                "comision_pos": Decimal("0"),
+            })
+
         for sale_id, lines in sale_lines.items():
             sale = sales[sale_id]
             if sale["total"] > sale["subtotal"]:
@@ -179,9 +204,10 @@ class LiquidacionesService:
                 products[(brand_id, product_id)]["comision_pos"] += fee_share
 
         collected = {method: Decimal("0") for method in ("efectivo", "tarjeta", "transferencia")}
+        account_sales = Decimal("0")
         for payment_row in payment_rows:
             method = str(payment_row["metodo"])
-            if method not in collected:
+            if method not in collected and method != "cuenta de marca":
                 continue
             weights_by_brand = {}
             for brand_id, _, amount in sale_lines.get(payment_row["venta_id"], []):
@@ -189,7 +215,10 @@ class LiquidacionesService:
             allocations = _allocate(_decimal(payment_row["cobrado"]), list(weights_by_brand.values()))
             for brand_id, amount in zip(weights_by_brand, allocations):
                 if not brand_ids or brand_id in selected_brands:
-                    collected[method] += amount
+                    if method == "cuenta de marca":
+                        account_sales += amount
+                    else:
+                        collected[method] += amount
         for row in return_rows:
             if row["estado_reembolso"] != "Reembolsado":
                 continue
@@ -198,12 +227,26 @@ class LiquidacionesService:
             method = str(row["metodo_reembolso"]).strip().lower()
             if method in collected:
                 collected[method] -= _decimal(row["monto_devuelto"])
+            elif method == "cuenta de marca":
+                account_sales -= _decimal(row["monto_devuelto"])
         brands = []
         for brand in brand_map.values():
             commission = Decimal("0.00")
+            base_net = brand["ventas_brutas"] - brand["comision_pos"]
+            charge = charges_by_brand.get(brand["marca_id"], {})
+            pending_charge = _decimal(charge.get("descuentos_pendientes"))
+            charge_to_apply = (
+                _decimal(charge["deducciones_liquidacion"])
+                if charge.get("deducciones_liquidacion") is not None
+                else min(max(base_net, Decimal("0")), pending_charge)
+            )
             brands.append({
                 **brand, "comision_tienda": commission,
-                "neto_pagar": brand["ventas_brutas"] - brand["comision_pos"],
+                "neto_antes_deducciones": base_net,
+                "compras_periodo": _decimal(charge.get("compras_periodo")),
+                "descuentos_pendientes": pending_charge,
+                "total_deducciones_marca": charge_to_apply,
+                "neto_pagar": max(base_net - pending_charge, Decimal("0")),
             })
         if brand_ids:
             brands = [brand for brand in brands if brand["marca_id"] in selected_brands]
@@ -221,6 +264,7 @@ class LiquidacionesService:
         gross = sum((row["ventas_brutas"] for row in brands), Decimal("0"))
         store_commission = sum((row["comision_tienda"] for row in brands), Decimal("0"))
         pos_fee = sum((row["comision_pos"] for row in brands), Decimal("0"))
+        brand_deductions = sum((row["total_deducciones_marca"] for row in brands), Decimal("0"))
         for brand in brands:
             product_rows_for_brand = sorted(
                 (item for item in products.values() if item["marca_id"] == brand["marca_id"]),
@@ -234,11 +278,13 @@ class LiquidacionesService:
             "resumen": {
                 "ventas_brutas": gross,
                 "comision_tienda": store_commission,
-                "neto_marcas": gross - pos_fee,
+                "neto_marcas": gross - pos_fee - brand_deductions,
                 "comision_pos": pos_fee,
+                "deducciones_compras": brand_deductions,
                 "cobrado_efectivo": collected.get("efectivo", Decimal("0")),
                 "cobrado_tarjeta": collected.get("tarjeta", Decimal("0")),
                 "cobrado_transferencia": collected.get("transferencia", Decimal("0")),
+                "venta_a_cuenta_marca": account_sales,
                 "transacciones": len(selected_sales),
             },
             "por_dia": sorted(daily.values(), key=lambda row: row["fecha"]),
@@ -381,7 +427,8 @@ class LiquidacionesService:
 
         summary_cells = [
             ("A8:B8", "VENTAS BRUTAS", "C8", brand["ventas_brutas"]),
-            ("D8:E8", "NETO PARA LA MARCA", "F8:K8", brand["neto_pagar"]),
+            ("D8:E8", "COMPRAS DESCONTADAS", "F8", brand["total_deducciones_marca"]),
+            ("G8:H8", "NETO PARA LA MARCA", "I8:K8", brand["neto_pagar"]),
         ]
         for labels_range, label, amount_range, amount in summary_cells:
             ws.merge_cells(labels_range)
@@ -401,13 +448,13 @@ class LiquidacionesService:
 
         ws.merge_cells("A9:K9")
         payment_status = settlement["estado"] if settlement else "Sin liquidación generada"
-        ws["A9"] = f"ESTADO: {payment_status} · Comisión POS a cargo de la marca: C$ {brand['comision_pos']:,.2f}; deducida del neto a pagar."
+        ws["A9"] = f"ESTADO: {payment_status} · Comisión POS: C$ {brand['comision_pos']:,.2f} · Saldo de compras pendiente: C$ {brand['descuentos_pendientes'] - brand['total_deducciones_marca']:,.2f}."
         ws["A9"].font = Font(name="Segoe UI", size=9, bold=True, color=ink)
         ws["A9"].fill = PatternFill("solid", fgColor=blush)
         ws["A9"].alignment = Alignment(vertical="center", wrap_text=True)
         ws.row_dimensions[9].height = 25
 
-        headers = ["#", "SKU / CÓDIGO", "PRODUCTO", "UNIDADES", "VENTAS BRUTAS", "EFECTIVO", "TARJETA", "TRANSFERENCIA", "COMISIÓN POS", "NETO MARCA"]
+        headers = ["#", "SKU / CÓDIGO", "PRODUCTO", "UNIDADES", "VENTAS BRUTAS", "EFECTIVO", "TARJETA", "TRANSFERENCIA", "CUENTA MARCA", "COMISIÓN POS", "NETO MARCA"]
         for column, label in enumerate(headers, start=1):
             cell = ws.cell(10, column, label)
             cell.font = Font(name="Segoe UI", size=9, bold=True, color=white if column >= 5 else ink)
@@ -420,7 +467,7 @@ class LiquidacionesService:
         for index, item in enumerate(products, start=1):
             row = start_row + index - 1
             values = [index, item.get("sku") or "—", item["producto"], item["cantidad"], item["bruto"],
-                      item["metodos"]["efectivo"], item["metodos"]["tarjeta"], item["metodos"]["transferencia"],
+                      item["metodos"]["efectivo"], item["metodos"]["tarjeta"], item["metodos"]["transferencia"], item["metodos"]["cuenta_marca"],
                       item["comision_pos"], item["neto_marca"]]
             ws.row_dimensions[row].height = 25
             for column, value in enumerate(values, start=1):
@@ -440,7 +487,7 @@ class LiquidacionesService:
         total_label.fill = PatternFill("solid", fgColor=gold)
         total_label.alignment = Alignment(horizontal="right", vertical="center")
         totals = [brand["cantidad"], brand["ventas_brutas"], brand["por_metodo"]["efectivo"], brand["por_metodo"]["tarjeta"],
-                  brand["por_metodo"]["transferencia"], brand["comision_pos"], brand["neto_pagar"]]
+                  brand["por_metodo"]["transferencia"], brand["por_metodo"]["cuenta_marca"], brand["comision_pos"], brand["neto_pagar"]]
         for column, value in enumerate(totals, start=4):
             cell = ws.cell(total_row, column, int(value) if column == 4 else float(value))
             cell.font = Font(name="Segoe UI", size=9, bold=True, color=white)
@@ -543,7 +590,7 @@ class LiquidacionesService:
         first, last = _period(period)
         rows = db.execute(text("""
             SELECT l.id, l.marca_id, m.nombre_marca, l.periodo_inicio, l.periodo_fin,
-                   l.total_bruto, l.total_comision_pos, l.total_comision_tienda,
+                   l.total_bruto, l.total_comision_pos, l.total_comision_tienda, l.total_deducciones_marca,
                    l.total_neto_pagar, e.nombre AS estado, l.fecha_pago,
                    l.referencia_pago, c.banco, c.no_cuenta
             FROM liquidaciones l JOIN marcas m ON m.id = l.marca_id
@@ -564,7 +611,9 @@ class LiquidacionesService:
         selected_ids = sorted(set(brand_ids)) if brand_ids is not None else None
         if selected_ids == []:
             raise HTTPException(status_code=422, detail="Selecciona al menos una marca.")
-        brands_to_generate = [brand for brand in report["por_marca"] if selected_ids is None or brand["marca_id"] in selected_ids]
+        brands_to_generate = [brand for brand in report["por_marca"]
+                              if brand["neto_antes_deducciones"] > 0
+                              and (selected_ids is None or brand["marca_id"] in selected_ids)]
         if not brands_to_generate:
             raise HTTPException(status_code=422, detail="No hay ventas registradas en ese período.")
         try:
@@ -573,19 +622,59 @@ class LiquidacionesService:
             if pending_id is None:
                 raise HTTPException(status_code=500, detail="Falta configurar el estado Pendiente de liquidaciones.")
             for brand in brands_to_generate:
+                # ponytail: oldest unpaid brand invoices consume available settlement proceeds first.
+                db.execute(text("SELECT pg_advisory_xact_lock(:namespace, :brand_id)"),
+                           {"namespace": 19841024, "brand_id": brand["marca_id"]})
+                period_end = utc_naive_bounds(last + timedelta(days=1), last + timedelta(days=2))[0]
+                pending_charge = _decimal(db.execute(text("""
+                    SELECT COALESCE(sum(c.monto - COALESCE((
+                      SELECT sum(a.monto_aplicado) FROM liquidacion_cargos_marca a WHERE a.cargo_id=c.id
+                    ), 0)), 0)
+                    FROM cargos_marca c
+                    WHERE c.marca_id=:brand_id AND c.creado_en < :end
+                """), {"brand_id": brand["marca_id"], "end": period_end}).scalar_one())
+                brand["descuentos_pendientes"] = pending_charge
+                brand["total_deducciones_marca"] = min(max(brand["neto_antes_deducciones"], Decimal("0")), pending_charge)
+                brand["neto_pagar"] = max(brand["neto_antes_deducciones"] - brand["total_deducciones_marca"], Decimal("0"))
                 settlement_id = db.execute(text("""
                     INSERT INTO liquidaciones
                     (marca_id, periodo_inicio, periodo_fin, total_bruto, total_comision_pos,
-                     total_comision_tienda, total_neto_pagar, estado_id)
-                    VALUES (:brand_id, :first, :last, :gross, :pos_fee, :store_fee, :net, :state_id)
+                     total_comision_tienda, total_neto_pagar, total_deducciones_marca, estado_id)
+                    VALUES (:brand_id, :first, :last, :gross, :pos_fee, :store_fee, :net, :deductions, :state_id)
                     ON CONFLICT (marca_id, periodo_inicio, periodo_fin) DO NOTHING RETURNING id
                 """), {
                     "brand_id": brand["marca_id"], "first": first, "last": last,
                     "gross": brand["ventas_brutas"], "pos_fee": brand["comision_pos"],
-                    "store_fee": brand["comision_tienda"], "net": brand["neto_pagar"], "state_id": pending_id,
+                    "store_fee": brand["comision_tienda"], "net": brand["neto_pagar"],
+                    "deductions": brand["total_deducciones_marca"], "state_id": pending_id,
                 }).scalar()
                 if settlement_id is None:
                     continue
+                remaining_deduction = brand["total_deducciones_marca"]
+                cargo_rows = db.execute(text("""
+                    SELECT c.id, c.monto - COALESCE(aplicado.monto, 0) AS pendiente
+                    FROM cargos_marca c
+                    LEFT JOIN LATERAL (
+                      SELECT sum(a.monto_aplicado) AS monto
+                      FROM liquidacion_cargos_marca a
+                      WHERE a.cargo_id=c.id
+                    ) aplicado ON true
+                    WHERE c.marca_id=:brand_id AND c.creado_en < :end
+                      AND c.monto > COALESCE(aplicado.monto, 0)
+                    ORDER BY c.creado_en, c.id
+                    FOR UPDATE OF c
+                    """), {"brand_id": brand["marca_id"], "end": period_end}).mappings().all()
+                for cargo in cargo_rows:
+                    if remaining_deduction <= 0:
+                        break
+                    amount = min(remaining_deduction, _decimal(cargo["pendiente"]))
+                    if amount <= 0:
+                        continue
+                    db.execute(text("""
+                        INSERT INTO liquidacion_cargos_marca (cargo_id, liquidacion_id, monto_aplicado)
+                        VALUES (:cargo_id, :settlement_id, :amount)
+                    """), {"cargo_id": cargo["id"], "settlement_id": settlement_id, "amount": amount})
+                    remaining_deduction -= amount
                 detail_items = db.execute(text("""
                    SELECT p.marca_id, vd.producto_id, vd.cantidad, vd.subtotal,
                            mp.metodo_pago, v.id AS venta_id, v.comision_pos, v.total,
@@ -602,14 +691,14 @@ class LiquidacionesService:
                     pid = item["producto_id"]
                     detail = detail_groups.setdefault(pid, {
                         "settlement_id": settlement_id, "product_id": pid, "quantity": 0,
-                        "cash": Decimal("0"), "card": Decimal("0"), "transfer": Decimal("0"), "pos_fee": Decimal("0"),
+                        "cash": Decimal("0"), "card": Decimal("0"), "transfer": Decimal("0"), "account": Decimal("0"), "pos_fee": Decimal("0"),
                         "gross": Decimal("0"),
                     })
                     amount = _decimal(item["subtotal"])
                     detail["quantity"] += int(item["cantidad"])
                     detail["gross"] += amount
                     method = str(item["metodo_pago"]).strip().lower()
-                    key = "card" if method == "tarjeta" else "transfer" if method == "transferencia" else "cash"
+                    key = "account" if method == "cuenta de marca" else "card" if method == "tarjeta" else "transfer" if method == "transferencia" else "cash"
                     detail[key] += amount
                     detail_sales.setdefault(item["venta_id"], []).append((pid, amount, _decimal(item["comision_pos"]), _decimal(item["total"]), _decimal(item["subtotal_venta"])))
                 for sale_lines in detail_sales.values():
@@ -627,8 +716,8 @@ class LiquidacionesService:
                     db.execute(text("""
                         INSERT INTO liquidacion_detalles
                         (liquidacion_id, producto_id, cantidad_vendida, monto_efectivo, monto_tarjeta,
-                         monto_transferencia, comision_pos, comision_tienda, subtotal_neto)
-                        VALUES (:settlement_id, :product_id, :quantity, :cash, :card, :transfer,
+                         monto_transferencia, monto_cuenta_marca, comision_pos, comision_tienda, subtotal_neto)
+                        VALUES (:settlement_id, :product_id, :quantity, :cash, :card, :transfer, :account,
                                 :pos_fee, :store_fee, :net)
                     """), {
                         **detail
@@ -683,7 +772,7 @@ class LiquidacionesService:
         db.commit()
         row = db.execute(text("""
             SELECT l.id, l.marca_id, m.nombre_marca, l.periodo_inicio, l.periodo_fin, l.total_bruto,
-                   l.total_comision_pos, l.total_comision_tienda, l.total_neto_pagar,
+                   l.total_comision_pos, l.total_comision_tienda, l.total_deducciones_marca, l.total_neto_pagar,
                    e.nombre AS estado, l.fecha_pago, l.referencia_pago
             FROM liquidaciones l JOIN marcas m ON m.id = l.marca_id JOIN estados e ON e.id = l.estado_id
             WHERE l.id = :id

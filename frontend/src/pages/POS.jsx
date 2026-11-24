@@ -4,6 +4,7 @@ import brandConfig from '../brandConfig';
 import inventarioService from '../services/inventarioService';
 import posService from '../services/posService'; // Opcional, si tienes endpoint de venta
 import clientesService from '../services/clientesService';
+import marcasService from '../services/marcasService';
 import { formatCordobas } from '../utils/currency';
 import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
 
@@ -62,6 +63,10 @@ export default function POSPage() {
   const [commissionRate, setCommissionRate] = useState(6.75);
   const [commissionRateDraft, setCommissionRateDraft] = useState('6.75');
   const [savingCommissionRate, setSavingCommissionRate] = useState(false);
+  const [marcas, setMarcas] = useState([]);
+  const [facturarAMarca, setFacturarAMarca] = useState(false);
+  const [selectedBrandId, setSelectedBrandId] = useState('');
+  const [deductFromSettlement, setDeductFromSettlement] = useState(false);
 
   // 1. Cargar productos desde la base de datos (Backend Python)
   const cargarProductos = async () => {
@@ -79,6 +84,9 @@ export default function POSPage() {
 
   useEffect(() => {
     cargarProductos();
+  }, []);
+  useEffect(() => {
+    marcasService.getAll().then(setMarcas).catch(() => setMarcas([]));
   }, []);
   useEffect(() => {
     let active = true;
@@ -332,7 +340,7 @@ export default function POSPage() {
 
   // Procesar venta en el Backend Python
   const handleCompleteSale = async (metodo) => {
-    const paymentMethod = metodo || selectedMetodoPago;
+    const paymentMethod = deductFromSettlement ? 'Cuenta de marca' : (metodo || selectedMetodoPago);
     const invalidPricing = cart.some((item) => {
       const price = Number(item.precio);
       const discount = Number(item.descuentoValor);
@@ -344,10 +352,16 @@ export default function POSPage() {
       return;
     }
     if (paymentMethod === 'Efectivo' && cashReceivedCents < totalCents) return;
+    if (facturarAMarca && !selectedBrandId) {
+      notify('Selecciona la marca para emitir la factura.', 'warning');
+      return;
+    }
     try {
       setProcessingSale(true);
       const result = await posService.crearVenta({
         cliente_id: selectedClient?.id ?? null,
+        marca_cliente_id: facturarAMarca ? Number(selectedBrandId) : null,
+        descontar_de_liquidacion: facturarAMarca && deductFromSettlement,
         metodo_pago: paymentMethod,
         items: cart.map((item) => ({
           producto_id: item.id,
@@ -367,6 +381,9 @@ export default function POSPage() {
       setReceiptOpen(false);
       setCart([]);
       setSelectedClient(null);
+      setFacturarAMarca(false);
+      setSelectedBrandId('');
+      setDeductFromSettlement(false);
       setCustomerQuery('');
       setCustomerSearchOpen(false);
       setPaymentModalOpen(false);
@@ -564,7 +581,26 @@ export default function POSPage() {
                   {totalItems} UDS
                 </span>
               </div>
-              <div className="flex items-center gap-2 rounded-lg bg-surface-container-lowest p-2">
+              <label className="flex items-center gap-2 text-xs font-semibold text-on-surface-variant">
+                <input type="checkbox" checked={facturarAMarca} onChange={(event) => {
+                  setFacturarAMarca(event.target.checked);
+                  setSelectedClient(null);
+                  setCustomerQuery('');
+                  setDeductFromSettlement(false);
+                }} /> Facturar a una marca del colectivo
+              </label>
+              {facturarAMarca ? <div className="flex flex-col gap-2 rounded-lg bg-surface-container-lowest p-2">
+                <label className="text-xs font-semibold text-on-surface-variant">Marca
+                  <select value={selectedBrandId} onChange={(event) => setSelectedBrandId(event.target.value)} className="mt-1 h-9 w-full rounded-md border border-surface-container-low bg-white px-2 text-xs text-on-surface">
+                    <option value="">Selecciona una marca</option>
+                    {marcas.map((brand) => <option key={brand.id} value={brand.id}>{brand.nombre_marca}</option>)}
+                  </select>
+                </label>
+                <label className="flex items-start gap-2 rounded-lg bg-primary-fixed/40 p-2 text-xs text-on-surface">
+                  <input type="checkbox" checked={deductFromSettlement} onChange={(event) => setDeductFromSettlement(event.target.checked)} />
+                  <span><strong>Descontar de liquidaciones</strong><span className="block text-on-surface-variant">La factura quedará a cuenta de la marca y se descontará del próximo pago de ventas.</span></span>
+                </label>
+              </div> : <div className="flex items-center gap-2 rounded-lg bg-surface-container-lowest p-2">
                 <span className="material-symbols-outlined text-primary text-[20px]">person</span>
                 <div className="relative min-w-0 flex-1">
                   <input
@@ -588,7 +624,7 @@ export default function POSPage() {
                   </div>}
                 </div>
                 {selectedClient ? <button type="button" onClick={() => { setSelectedClient(null); setCustomerQuery(''); }} className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold text-on-surface-variant hover:bg-surface-container-low">Quitar</button> : <span className="shrink-0 text-[11px] text-on-surface-variant">{customerQuery.trim() ? 'Sin seleccionar' : 'Consumidor Final'}</span>}
-              </div>
+              </div>}
             </div>
 
             {/* Items Carrito */}
@@ -725,6 +761,11 @@ export default function POSPage() {
               </div>
             </section>
             <div className="flex flex-col gap-2">
+              {deductFromSettlement ? <section className="rounded-xl border border-primary/30 bg-primary-fixed/30 p-4 text-center">
+                <p className="text-sm font-semibold text-on-surface">Factura a cuenta de {marcas.find((brand) => String(brand.id) === selectedBrandId)?.nombre_marca || 'la marca'}</p>
+                <p className="mt-1 text-xs text-on-surface-variant">No se recibe dinero ahora. El monto se descontará de las ventas de la marca.</p>
+                <button type="button" disabled={processingSale || !selectedBrandId} onClick={() => handleCompleteSale('Cuenta de marca')} className="mt-3 w-full rounded-lg bg-primary px-3 py-2.5 text-sm font-bold text-on-primary disabled:opacity-50">Facturar a cuenta por {formatCordobas(totalCents / 100)}</button>
+              </section> : <>
               <button
                 disabled={processingSale}
                 aria-expanded={cashEntryOpen}
@@ -795,6 +836,7 @@ export default function POSPage() {
                 </span>
                 <span></span>
               </button>
+              </>}
             </div>
             <button
               onClick={() => setPaymentModalOpen(false)}
