@@ -23,6 +23,7 @@ export default function RentaPage() {
   const [config, setConfig] = useState(blankConfig());
   const [configMode, setConfigMode] = useState(null);
   const [paymentFor, setPaymentFor] = useState(null);
+  const [paymentReceipt, setPaymentReceipt] = useState(null);
   const [payment, setPayment] = useState({ monto_pagado: '', fecha_pago: localDate(), referencia_pago: '', comentario: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -134,8 +135,21 @@ export default function RentaPage() {
     setSaving(true);
     setError('');
     try {
-      await rentaService.registrarPago(paymentFor.id, {
+      const result = await rentaService.registrarPago(paymentFor.id, {
         ...payment, monto_pagado: Number(payment.monto_pagado),
+      });
+      const amount = Number(payment.monto_pagado);
+      setPaymentReceipt({
+        pago_id: result.pago_id,
+        marca: paymentFor.marca,
+        periodo: paymentFor.periodo,
+        fecha_vencimiento: paymentFor.fecha_vencimiento,
+        fecha_pago: payment.fecha_pago,
+        monto_pagado: amount,
+        saldo_anterior: Number(paymentFor.saldo),
+        saldo_nuevo: Math.max(0, Number(paymentFor.saldo) - amount),
+        referencia_pago: payment.referencia_pago,
+        comentario: payment.comentario,
       });
       setPaymentFor(null);
       setPayment({ monto_pagado: '', fecha_pago: localDate(), referencia_pago: '', comentario: '' });
@@ -234,11 +248,29 @@ export default function RentaPage() {
     <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
       <div className="flex flex-col gap-3 border-b border-stone-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="font-semibold">Cobros de {period}</h2><p className="mt-1 text-xs text-on-surface-variant">Registra abonos desde cada saldo pendiente. El reporte incluye los saldos del mes seleccionado.</p></div></div>
       {loading ? <SplashScreen compact message="Cargando cobros de renta..." /> : !data?.rentas.length ? <p className="p-8 text-center text-on-surface-variant">No se han generado cobros para este mes. Configura las marcas y genera el período.</p> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-stone-50 text-xs uppercase text-stone-500"><tr><th className="px-5 py-3">Marca</th><th className="px-5 py-3">Vencimiento</th><th className="px-5 py-3 text-right">Renta (USD)</th><th className="px-5 py-3 text-right">Pagado (USD)</th><th className="px-5 py-3 text-right">Saldo (USD)</th><th className="px-5 py-3">Estado</th><th className="px-5 py-3"></th></tr></thead><tbody className="divide-y divide-stone-100">{rentRows.map((row) => <tr key={row.id}>
-        <td className="px-5 py-4 font-semibold">{row.marca}</td><td className="px-5 py-4">{row.fecha_vencimiento || '—'}{row.por_vencer && <span className="mt-1 block text-xs font-medium text-amber-700">Vence pronto</span>}</td><td className="px-5 py-4 text-right">{formatDollars(row.monto)}</td><td className="px-5 py-4 text-right">{formatDollars(row.pagado)}</td><td className="px-5 py-4 text-right font-semibold">{formatDollars(row.saldo)}</td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${row.estado === 'Pagada' ? 'bg-emerald-100 text-emerald-800' : row.estado === 'Vencida' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}`}>{row.estado}</span></td><td className="px-5 py-4 text-right">{row.saldo > 0 && <button type="button" onClick={() => beginPayment(row)} className="rounded-lg bg-primary-fixed px-3 py-2 text-xs font-semibold">Abonar pago</button>}<details className="mt-2 text-left"><summary className="cursor-pointer text-xs text-on-surface-variant">Pagos ({row.pagos.length})</summary><div className="mt-2 space-y-1">{row.pagos.map((item) => <p key={item.pago_id} className="text-xs text-on-surface-variant">{item.fecha_pago} · {formatDollars(item.monto_pagado)} · Ref. {item.referencia_pago}{item.comentario ? ` · ${item.comentario}` : ''}</p>)}</div></details></td>
+        <td className="px-5 py-4 font-semibold">{row.marca}</td><td className="px-5 py-4">{row.fecha_vencimiento || '—'}{row.por_vencer && <span className="mt-1 block text-xs font-medium text-amber-700">Vence pronto</span>}</td><td className="px-5 py-4 text-right">{formatDollars(row.monto)}</td><td className="px-5 py-4 text-right">{formatDollars(row.pagado)}</td><td className="px-5 py-4 text-right font-semibold">{formatDollars(row.saldo)}</td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${row.estado === 'Pagada' ? 'bg-emerald-100 text-emerald-800' : row.estado === 'Vencida' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}`}>{row.estado}</span></td><td className="px-5 py-4 text-right">{Number(row.saldo) > 0 && <button type="button" disabled={saving} onClick={() => beginPayment(row)} className="rounded-lg bg-primary-fixed px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50">Abonar pago</button>}<details className="mt-2 text-left"><summary className="cursor-pointer text-xs text-on-surface-variant">Pagos ({row.pagos.length})</summary><div className="mt-2 space-y-1">{row.pagos.map((item) => <p key={item.pago_id} className="text-xs text-on-surface-variant">{item.fecha_pago} · {formatDollars(item.monto_pagado)} · Ref. {item.referencia_pago}{item.comentario ? ` · ${item.comentario}` : ''}</p>)}</div></details></td>
       </tr>)}{!rentRows.length && <tr><td colSpan="7" className="p-8 text-center text-on-surface-variant">No hay cobros para este mes.</td></tr>}</tbody></table></div>}
     </div>
 
 
     {paymentFor && <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4 modal-scroll-overlay"><form onSubmit={savePayment} className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-xl"><div><h2 className="text-xl font-bold">Abonar pago</h2><p className="mt-1 text-sm text-on-surface-variant">{paymentFor.marca} · saldo {formatDollars(paymentFor.saldo)}</p></div>{error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}<label className="block text-sm font-medium">Monto recibido (USD)<input required min="0.01" max={paymentFor.saldo} step="0.01" type="number" value={payment.monto_pagado} onChange={(event) => setPayment({ ...payment, monto_pagado: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label><label className="block text-sm font-medium">Fecha del pago<input required max={localDate()} type="date" value={payment.fecha_pago} onChange={(event) => setPayment({ ...payment, fecha_pago: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label><label className="block text-sm font-medium">Referencia / comprobante<input required maxLength={255} value={payment.referencia_pago} onChange={(event) => setPayment({ ...payment, referencia_pago: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" placeholder="Número de transferencia o recibo" /></label><label className="block text-sm font-medium">Comentario opcional<input maxLength={1000} value={payment.comentario} onChange={(event) => setPayment({ ...payment, comentario: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5" /></label><div className="flex justify-end gap-2"><button type="button" onClick={() => setPaymentFor(null)} className="rounded-lg border px-4 py-2">Cancelar</button><button disabled={saving} className="rounded-lg bg-primary px-4 py-2 font-semibold text-white disabled:opacity-50">{saving ? 'Guardando…' : 'Guardar abono'}</button></div></form></div>}
+
+    {paymentReceipt && <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-black/50 p-4 modal-scroll-overlay">
+      <style>{`@media print { @page { size: 80mm auto; margin: 4mm; } body * { visibility: hidden !important; } #rent-payment-receipt, #rent-payment-receipt * { visibility: visible !important; } #rent-payment-receipt { position: fixed; inset: 0 auto auto 0; width: 72mm; max-width: none; margin: 0; border: 0; box-shadow: none; } .rent-receipt-actions { display: none !important; } }`}</style>
+      <section id="rent-payment-receipt" className="w-full max-w-md rounded-2xl bg-white p-6 font-mono text-sm text-stone-800 shadow-2xl">
+        <header className="border-b border-dashed border-stone-300 pb-4 text-center"><p className="text-xs font-semibold uppercase tracking-widest text-stone-500">Moon Concept Store</p><h2 className="mt-2 text-lg font-bold">Comprobante de abono de renta</h2><p className="mt-1 text-xs">Recibo #{String(paymentReceipt.pago_id).padStart(6, '0')}</p></header>
+        <div className="space-y-2 border-b border-dashed border-stone-300 py-4 text-xs">
+          <div className="flex justify-between gap-3"><span>Marca</span><strong className="text-right">{paymentReceipt.marca}</strong></div>
+          <div className="flex justify-between gap-3"><span>Período</span><strong>{paymentReceipt.periodo}</strong></div>
+          <div className="flex justify-between gap-3"><span>Fecha de abono</span><strong>{paymentReceipt.fecha_pago}</strong></div>
+          <div className="flex justify-between gap-3"><span>Vencimiento</span><strong>{paymentReceipt.fecha_vencimiento || '—'}</strong></div>
+          <div className="flex justify-between gap-3"><span>Referencia</span><strong className="text-right">{paymentReceipt.referencia_pago}</strong></div>
+          {paymentReceipt.comentario && <div className="flex justify-between gap-3"><span>Comentario</span><strong className="text-right">{paymentReceipt.comentario}</strong></div>}
+        </div>
+        <div className="space-y-2 py-4 text-xs"><div className="flex justify-between"><span>Saldo anterior</span><strong>{formatDollars(paymentReceipt.saldo_anterior)}</strong></div><div className="flex justify-between text-base font-bold"><span>Abono recibido</span><strong>{formatDollars(paymentReceipt.monto_pagado)}</strong></div><div className="flex justify-between border-t border-stone-200 pt-2 font-bold"><span>Saldo pendiente</span><strong>{formatDollars(paymentReceipt.saldo_nuevo)}</strong></div></div>
+        <p className="border-t border-dashed border-stone-300 pt-4 text-center text-[10px]">Conserve este comprobante como constancia del pago.</p>
+        <div className="rent-receipt-actions mt-5 flex gap-2 font-sans"><button type="button" onClick={() => window.print()} className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white">Imprimir comprobante</button><button type="button" onClick={() => setPaymentReceipt(null)} className="rounded-lg border border-stone-200 px-4 py-2.5 text-sm">Cerrar</button></div>
+      </section>
+    </div>}
   </section>;
 }
