@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
+import json
 
 from fastapi import HTTPException
 from sqlalchemy import bindparam, text
@@ -81,16 +82,19 @@ class POSService:
         """
         summary = db.execute(text(f"""
             SELECT count(*) AS transacciones,
-                   COALESCE(sum(v.total), 0) AS total_cobrado,
-                   COALESCE(sum((SELECT COALESCE(sum(vd.subtotal), 0) FROM venta_detalles vd WHERE vd.venta_id = v.id)), 0) AS ventas_productos,
+                   COALESCE(sum(v.total - COALESCE((SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id),0)), 0) AS total_cobrado,
+                   COALESCE(sum((SELECT COALESCE(sum(vd.subtotal), 0) FROM venta_detalles vd WHERE vd.venta_id = v.id)
+                     - COALESCE((SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id),0)), 0) AS ventas_productos,
                    COALESCE(sum(v.comision_pos), 0) AS comision_pos
             {from_sql} WHERE {where}
         """), params).mappings().one()
         sales = db.execute(text(f"""
             SELECT v.id, v.fecha_venta, COALESCE(c.nombre_cliente, 'Consumidor Final') AS cliente,
                    COALESCE(mp.metodo_pago, 'Sin método') AS metodo_pago,
-                   v.total, v.comision_pos,
-                   (SELECT COALESCE(sum(vd.subtotal), 0) FROM venta_detalles vd WHERE vd.venta_id = v.id) AS subtotal
+                   v.total - COALESCE((SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id),0) AS total,
+                   v.comision_pos,
+                   (SELECT COALESCE(sum(vd.subtotal), 0) FROM venta_detalles vd WHERE vd.venta_id = v.id)
+                     - COALESCE((SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id),0) AS subtotal
             {from_sql} WHERE {where}
             ORDER BY v.fecha_venta DESC, v.id DESC
             LIMIT :limit OFFSET :offset
@@ -101,10 +105,15 @@ class POSService:
             item_rows = db.execute(text("""
                 SELECT vd.venta_id, vd.producto_id, p.nombre AS producto, p.sku,
                        m.id AS marca_id, m.nombre_marca AS marca,
-                       vd.cantidad, vd.precio_unitario, vd.descuento, vd.subtotal
+                       vd.cantidad-COALESCE(ret.cantidad,0) AS cantidad, vd.precio_unitario, vd.descuento,
+                       vd.subtotal-COALESCE(ret.monto,0) AS subtotal
                 FROM venta_detalles vd
                 JOIN productos p ON p.id = vd.producto_id
                 JOIN marcas m ON m.id = p.marca_id
+                LEFT JOIN LATERAL (
+                  SELECT sum(d.cantidad)::integer AS cantidad, sum(d.monto_devuelto)::numeric(12,2) AS monto
+                  FROM devoluciones_venta_detalles d WHERE d.venta_detalle_id=vd.id
+                ) ret ON true
                 WHERE vd.venta_id IN :sale_ids
                 ORDER BY vd.venta_id, m.nombre_marca, p.nombre
             """).bindparams(bindparam("sale_ids", expanding=True)), {"sale_ids": sale_ids}).mappings().all()
@@ -143,44 +152,82 @@ class POSService:
         return {"comision_tarjeta_porcentaje": value}
 
     @staticmethod
-    def list_returnable_sales(db: Session, search: str | None = None, page: int = 1, page_size: int = 25) -> dict:
-        where = ["e.modulo = 'ventas'", "e.nombre = 'Facturada'",
-                 "NOT EXISTS (SELECT 1 FROM devoluciones_venta r WHERE r.venta_id = v.id)"]
+    def list_sales_for_returns(
+        db: Session,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        invoice_code: str | None = None,
+        product_search: str | None = None,
+        page: int = 1,
+        page_size: int = 25,
+    ) -> dict:
+        if start_date and end_date and start_date > end_date:
+            raise HTTPException(status_code=422, detail="La fecha inicial no puede ser posterior a la final.")
+        clauses = ["1 = 1"]
         params = {"limit": page_size, "offset": (page - 1) * page_size}
-        if search and search.strip():
-            where.append("""(
-                v.id::text ILIKE :search OR lpad(v.id::text, 6, '0') ILIKE :search
-                OR COALESCE(c.nombre_cliente, '') ILIKE :search
-                OR EXISTS (SELECT 1 FROM venta_detalles sx JOIN productos sp ON sp.id = sx.producto_id
-                           WHERE sx.venta_id = v.id AND (sp.nombre ILIKE :search OR COALESCE(sp.sku, '') ILIKE :search))
+        if start_date:
+            start_bound, _ = utc_naive_bounds(start_date, start_date + timedelta(days=1))
+            clauses.append("v.fecha_venta >= :start_bound")
+            params["start_bound"] = start_bound
+        if end_date:
+            _, end_bound = utc_naive_bounds(end_date, end_date + timedelta(days=1))
+            clauses.append("v.fecha_venta < :end_bound")
+            params["end_bound"] = end_bound
+        if invoice_code and invoice_code.strip():
+            clauses.append("(v.id::text ILIKE :invoice OR lpad(v.id::text, 6, '0') ILIKE :invoice)")
+            params["invoice"] = f"%{invoice_code.strip().lstrip('#')}%"
+        if product_search and product_search.strip():
+            clauses.append("""EXISTS (
+                SELECT 1 FROM venta_detalles sx JOIN productos sp ON sp.id=sx.producto_id
+                WHERE sx.venta_id=v.id AND (sp.nombre ILIKE :product OR COALESCE(sp.sku,'') ILIKE :product)
             )""")
-            params["search"] = f"%{search.strip()}%"
-        clause = " AND ".join(where)
+            params["product"] = f"%{product_search.strip()}%"
+        where = " AND ".join(clauses)
         total = db.execute(text(f"""
-            SELECT count(*) FROM ventas v
-            JOIN estados e ON e.id = v.estado_id
-            LEFT JOIN clientes c ON c.id = v.cliente_id
-            WHERE {clause}
+            SELECT count(*) FROM ventas v WHERE {where}
         """), params).scalar_one()
         rows = db.execute(text(f"""
-            SELECT v.id, v.fecha_venta, v.total,
-                   COALESCE(c.nombre_cliente, 'Consumidor Final') AS cliente,
-                   mp.metodo_pago,
+            SELECT v.id, v.fecha_venta, v.total, e.nombre AS estado_venta,
+                   COALESCE(c.nombre_cliente, 'Consumidor Final') AS cliente, mp.metodo_pago,
+                   COALESCE((SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id),0) AS monto_devuelto,
+                   EXISTS (SELECT 1 FROM devoluciones_venta r WHERE r.venta_id=v.id AND r.estado_reembolso='Pendiente') AS reembolso_pendiente,
+                   COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                     'id',r.id,'monto',r.monto_reembolso,'metodo',r.metodo_reembolso,
+                     'estado',r.estado_reembolso,'fecha',r.fecha_devolucion,
+                     'referencia',r.reembolso_referencia,'reembolsado_en',r.reembolsado_en
+                   ) ORDER BY r.fecha_devolucion,r.id) FROM devoluciones_venta r WHERE r.venta_id=v.id),'[]'::jsonb) AS historial_devoluciones,
                    COALESCE((
                      SELECT jsonb_agg(jsonb_build_object(
-                       'producto_id', vd.producto_id, 'producto', p.nombre, 'sku', p.sku,
-                       'cantidad', vd.cantidad, 'precio_unitario', vd.precio_unitario,
-                       'descuento', vd.descuento, 'subtotal', vd.subtotal
+                       'venta_detalle_id', vd.id, 'producto_id', vd.producto_id, 'producto', p.nombre,
+                       'sku', p.sku, 'cantidad_vendida', vd.cantidad,
+                       'cantidad_devuelta', COALESCE(rd.cantidad,0),
+                       'cantidad_disponible', GREATEST(vd.cantidad-COALESCE(rd.cantidad,0),0),
+                       'subtotal', vd.subtotal, 'monto_devuelto', COALESCE(rd.monto,0)
                      ) ORDER BY p.nombre)
-                     FROM venta_detalles vd JOIN productos p ON p.id = vd.producto_id
-                     WHERE vd.venta_id = v.id
-                   ), '[]'::jsonb) AS items
+                     FROM venta_detalles vd JOIN productos p ON p.id=vd.producto_id
+                     LEFT JOIN LATERAL (
+                       SELECT sum(d.cantidad)::integer AS cantidad, sum(d.monto_devuelto)::numeric(12,2) AS monto
+                       FROM devoluciones_venta_detalles d WHERE d.venta_detalle_id=vd.id
+                     ) rd ON true
+                     WHERE vd.venta_id=v.id
+                   ), '[]'::jsonb) AS items,
+                   CASE
+                     WHEN e.nombre='Anulada' THEN 'Anulada'
+                     WHEN NOT EXISTS (
+                       SELECT 1 FROM venta_detalles vd
+                       LEFT JOIN LATERAL (SELECT COALESCE(sum(d.cantidad),0)::integer AS cantidad
+                         FROM devoluciones_venta_detalles d WHERE d.venta_detalle_id=vd.id) rd ON true
+                       WHERE vd.venta_id=v.id AND vd.cantidad>COALESCE(rd.cantidad,0)
+                     ) AND EXISTS (SELECT 1 FROM devoluciones_venta r WHERE r.venta_id=v.id) THEN 'Devuelta'
+                     WHEN EXISTS (SELECT 1 FROM devoluciones_venta r WHERE r.venta_id=v.id) THEN 'Parcial'
+                     ELSE 'Sin devolución'
+                   END AS estado_devolucion
             FROM ventas v
-            JOIN estados e ON e.id = v.estado_id
-            JOIN metodo_pago mp ON mp.id = v.metodo_pago_id
-            LEFT JOIN clientes c ON c.id = v.cliente_id
-            WHERE {clause}
-            ORDER BY v.fecha_venta DESC, v.id DESC
+            JOIN estados e ON e.id=v.estado_id AND e.modulo='ventas'
+            JOIN metodo_pago mp ON mp.id=v.metodo_pago_id
+            LEFT JOIN clientes c ON c.id=v.cliente_id
+            WHERE {where}
+            ORDER BY v.fecha_venta DESC,v.id DESC
             LIMIT :limit OFFSET :offset
         """), params).mappings().all()
         sales = [dict(row) for row in rows]
@@ -189,58 +236,11 @@ class POSService:
         return {"pagina": page, "por_pagina": page_size, "total": int(total), "ventas": sales}
 
     @staticmethod
-    def list_returns(db: Session, search: str | None = None, page: int = 1, page_size: int = 25) -> dict:
-        where = ["1 = 1"]
-        params = {"limit": page_size, "offset": (page - 1) * page_size}
-        if search and search.strip():
-            where.append("""(
-                r.venta_id::text ILIKE :search OR lpad(r.venta_id::text, 6, '0') ILIKE :search
-                OR c.nombre_cliente ILIKE :search
-                OR EXISTS (SELECT 1 FROM devoluciones_venta_detalles d JOIN productos p ON p.id=d.producto_id
-                           WHERE d.devolucion_id=r.id AND (p.nombre ILIKE :search OR COALESCE(p.sku, '') ILIKE :search))
-            )""")
-            params["search"] = f"%{search.strip()}%"
-        clause = " AND ".join(where)
-        total = db.execute(text(f"""
-            SELECT count(*) FROM devoluciones_venta r
-            JOIN ventas v ON v.id = r.venta_id LEFT JOIN clientes c ON c.id = v.cliente_id
-            WHERE {clause}
-        """), params).scalar_one()
-        rows = db.execute(text(f"""
-            SELECT r.id, r.venta_id, r.fecha_devolucion, r.motivo, r.monto_reembolso,
-                   r.metodo_reembolso, r.estado_reembolso, r.reembolsado_en,
-                   r.reembolso_referencia, COALESCE(c.nombre_cliente, 'Consumidor Final') AS cliente,
-                   COALESCE(u.nombre, '') AS registrado_por,
-                   COALESCE(ru.nombre, '') AS reembolso_registrado_por,
-                   COALESCE((
-                     SELECT jsonb_agg(jsonb_build_object(
-                       'producto_id', d.producto_id, 'producto', p.nombre,
-                       'cantidad', d.cantidad, 'monto_devuelto', d.monto_devuelto
-                     ) ORDER BY p.nombre)
-                     FROM devoluciones_venta_detalles d JOIN productos p ON p.id = d.producto_id
-                     WHERE d.devolucion_id = r.id
-                   ), '[]'::jsonb) AS items
-            FROM devoluciones_venta r
-            JOIN ventas v ON v.id = r.venta_id
-            LEFT JOIN clientes c ON c.id = v.cliente_id
-            LEFT JOIN usuarios u ON u.id = r.registrado_por
-            LEFT JOIN usuarios ru ON ru.id = r.reembolso_registrado_por
-            WHERE {clause}
-            ORDER BY r.fecha_devolucion DESC, r.id DESC
-            LIMIT :limit OFFSET :offset
-        """), params).mappings().all()
-        returns = [dict(row) for row in rows]
-        for item in returns:
-            item["fecha_devolucion"] = POSService._managua_iso(item["fecha_devolucion"])
-            item["reembolsado_en"] = POSService._managua_iso(item["reembolsado_en"])
-        return {"pagina": page, "por_pagina": page_size, "total": int(total), "devoluciones": returns}
-
-    @staticmethod
-    def register_return(db: Session, sale_id: int, reason: str, user_id: int) -> dict:
+    def register_return(db: Session, sale_id: int, reason: str, lines: list[dict], user_id: int) -> dict:
         try:
             result = db.execute(text("""
-                SELECT internal.registrar_devolucion_venta(:sale_id, :reason, :user_id)
-            """), {"sale_id": sale_id, "reason": reason, "user_id": user_id}).scalar_one()
+                SELECT internal.registrar_devolucion_venta(:sale_id, :reason, CAST(:lines AS jsonb), :user_id)
+            """), {"sale_id": sale_id, "reason": reason, "lines": json.dumps(lines), "user_id": user_id}).scalar_one()
             db.commit()
             return result
         except Exception:

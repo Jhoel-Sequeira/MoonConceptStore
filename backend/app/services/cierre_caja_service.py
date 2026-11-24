@@ -34,12 +34,20 @@ def lock_day(db: Session, day: date) -> None:
 def _payments(db: Session, day: date) -> dict[str, Decimal]:
     start, end = utc_naive_bounds(day, day + timedelta(days=1))
     rows = db.execute(text("""
-        SELECT lower(trim(p.metodo_pago)) AS metodo, COALESCE(sum(p.monto), 0) AS monto
-        FROM pagos_venta p
-        JOIN ventas v ON v.id = p.venta_id
-        JOIN estados e ON e.id = v.estado_id AND e.modulo = 'ventas' AND e.nombre = 'Facturada'
-        WHERE v.fecha_venta >= :start AND v.fecha_venta < :end
-        GROUP BY lower(trim(p.metodo_pago))
+        WITH movimientos AS (
+            SELECT lower(trim(p.metodo_pago)) AS metodo, p.monto AS monto
+            FROM pagos_venta p
+            JOIN ventas v ON v.id = p.venta_id
+            JOIN estados e ON e.id = v.estado_id AND e.modulo = 'ventas' AND e.nombre = 'Facturada'
+            WHERE v.fecha_venta >= :start AND v.fecha_venta < :end
+            UNION ALL
+            SELECT lower(trim(r.metodo_reembolso)) AS metodo, -r.monto_reembolso AS monto
+            FROM devoluciones_venta r
+            WHERE r.estado_reembolso = 'Reembolsado'
+              AND r.reembolsado_en >= :start AND r.reembolsado_en < :end
+        )
+        SELECT metodo, COALESCE(sum(monto), 0) AS monto
+        FROM movimientos GROUP BY metodo
     """), {"start": start, "end": end}).mappings().all()
     return {str(row["metodo"]): Decimal(row["monto"] or 0) for row in rows}
 

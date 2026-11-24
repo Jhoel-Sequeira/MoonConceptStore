@@ -22,7 +22,12 @@ class DashboardService:
         today = db.execute(
             text(f"""
                 SELECT
-                    COALESCE(SUM(v.total), 0) AS sales_total,
+                    COALESCE(SUM(v.total), 0) - COALESCE((
+                        SELECT SUM(r.monto_reembolso) FROM devoluciones_venta r
+                        JOIN ventas rv ON rv.id=r.venta_id JOIN estados re ON re.id=rv.estado_id
+                          AND re.modulo='ventas' AND re.nombre='Facturada'
+                        WHERE r.fecha_devolucion >= :today_start AND r.fecha_devolucion < :tomorrow_start
+                    ), 0) AS sales_total,
                     COUNT(DISTINCT v.id) AS sales_count,
                     COUNT(DISTINCT v.cliente_id) AS customers_count,
                     COALESCE((
@@ -32,6 +37,13 @@ class DashboardService:
                         WHERE vs.fecha_venta >= :today_start
                           AND vs.fecha_venta < :tomorrow_start
                           AND vs.estado_id IN ({billed_status})
+                    ), 0) - COALESCE((
+                        SELECT SUM(d.cantidad)
+                        FROM devoluciones_venta r
+                        JOIN devoluciones_venta_detalles d ON d.devolucion_id=r.id
+                        JOIN ventas rv ON rv.id=r.venta_id JOIN estados re ON re.id=rv.estado_id
+                          AND re.modulo='ventas' AND re.nombre='Facturada'
+                        WHERE r.fecha_devolucion >= :today_start AND r.fecha_devolucion < :tomorrow_start
                     ), 0) AS units_sold
                 FROM ventas v
                 WHERE v.fecha_venta >= :today_start
@@ -47,27 +59,41 @@ class DashboardService:
                         :today,
                         INTERVAL '1 day'
                     )::date AS day
+                ), movements AS (
+                    SELECT (v.fecha_venta AT TIME ZONE 'UTC' AT TIME ZONE 'America/Managua')::date AS day, v.total AS amount
+                    FROM ventas v JOIN estados e ON e.id=v.estado_id
+                    WHERE e.modulo='ventas' AND e.nombre='Facturada'
+                      AND (v.fecha_venta AT TIME ZONE 'UTC' AT TIME ZONE 'America/Managua')::date BETWEEN :week_start AND :today
+                    UNION ALL
+                    SELECT (r.fecha_devolucion AT TIME ZONE 'UTC' AT TIME ZONE 'America/Managua')::date AS day, -r.monto_reembolso AS amount
+                    FROM devoluciones_venta r
+                    JOIN ventas rv ON rv.id=r.venta_id JOIN estados re ON re.id=rv.estado_id AND re.modulo='ventas' AND re.nombre='Facturada'
+                    WHERE (r.fecha_devolucion AT TIME ZONE 'UTC' AT TIME ZONE 'America/Managua')::date BETWEEN :week_start AND :today
                 )
-                SELECT days.day, COALESCE(SUM(v.total), 0) AS total
+                SELECT days.day, COALESCE(SUM(movements.amount), 0) AS total
                 FROM days
-                LEFT JOIN ventas v
-                  ON (v.fecha_venta AT TIME ZONE 'UTC' AT TIME ZONE 'America/Managua')::date = days.day
-                 AND v.estado_id IN ({billed_status})
+                LEFT JOIN movements ON movements.day = days.day
                 GROUP BY days.day
                 ORDER BY days.day
             """), {"week_start": week_start, "today": today_date}).mappings().all()
 
         best_sellers = db.execute(
             text(f"""
-                SELECT p.id, p.nombre, SUM(vd.cantidad) AS units
-                FROM ventas v
-                JOIN venta_detalles vd ON vd.venta_id = v.id
-                JOIN productos p ON p.id = vd.producto_id
-                WHERE v.fecha_venta >= :week_start_utc
-                  AND v.fecha_venta < :tomorrow_start
-                  AND v.estado_id IN ({billed_status})
-                GROUP BY p.id, p.nombre
-                ORDER BY units DESC, p.nombre
+                WITH unit_movements AS (
+                    SELECT p.id, p.nombre, vd.cantidad AS units
+                    FROM ventas v JOIN venta_detalles vd ON vd.venta_id=v.id
+                    JOIN productos p ON p.id=vd.producto_id
+                    WHERE v.fecha_venta >= :week_start_utc AND v.fecha_venta < :tomorrow_start
+                      AND v.estado_id IN ({billed_status})
+                    UNION ALL
+                    SELECT p.id, p.nombre, -d.cantidad AS units
+                    FROM devoluciones_venta r JOIN devoluciones_venta_detalles d ON d.devolucion_id=r.id
+                    JOIN productos p ON p.id=d.producto_id
+                    JOIN ventas rv ON rv.id=r.venta_id JOIN estados re ON re.id=rv.estado_id AND re.modulo='ventas' AND re.nombre='Facturada'
+                    WHERE r.fecha_devolucion >= :week_start_utc AND r.fecha_devolucion < :tomorrow_start
+                )
+                SELECT id, nombre, SUM(units) AS units FROM unit_movements GROUP BY id, nombre
+                ORDER BY units DESC, nombre
                 LIMIT 5
             """), {"week_start_utc": week_start_utc, "tomorrow_start": tomorrow_start}).mappings().all()
 

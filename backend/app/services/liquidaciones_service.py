@@ -84,12 +84,26 @@ class LiquidacionesService:
             WHERE v.fecha_venta >= :start AND v.fecha_venta < :end
             GROUP BY v.id, lower(trim(pv.metodo_pago))
         """), {"start": start, "end": end}).mappings().all()
+        return_rows = db.execute(text("""
+            SELECT r.id AS devolucion_id, r.venta_id, r.fecha_devolucion, r.metodo_reembolso,
+                   r.estado_reembolso, d.producto_id, d.cantidad, d.monto_devuelto,
+                   p.nombre, p.sku, p.marca_id, m.nombre_marca
+            FROM devoluciones_venta r
+            JOIN ventas v ON v.id=r.venta_id
+            JOIN estados e ON e.id=v.estado_id AND e.modulo='ventas' AND e.nombre='Facturada'
+            JOIN devoluciones_venta_detalles d ON d.devolucion_id=r.id
+            JOIN productos p ON p.id=d.producto_id
+            JOIN marcas m ON m.id=p.marca_id
+            WHERE r.fecha_devolucion >= :start AND r.fecha_devolucion < :end
+            ORDER BY r.id,p.marca_id,d.producto_id
+        """), {"start": start, "end": end}).mappings().all()
 
         sales = {}
         products = {}
         daily_by_brand = {}
         brand_map = {}
         sale_lines = {}
+        selected_brands = set(brand_ids)
         for row in product_rows:
             sale_id = row["venta_id"]
             line_amount = _decimal(row["subtotal"])
@@ -123,6 +137,38 @@ class LiquidacionesService:
             day["ventas_brutas"] += line_amount
             day["cantidad"] += int(row["cantidad"])
 
+        for row in return_rows:
+            if brand_ids and row["marca_id"] not in selected_brands:
+                continue
+            line_amount = _decimal(row["monto_devuelto"])
+            quantity = int(row["cantidad"])
+            brand = brand_map.setdefault(row["marca_id"], {
+                "marca_id": row["marca_id"], "marca": row["nombre_marca"],
+                "ventas_brutas": Decimal("0"), "cantidad": 0,
+                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0")},
+                "comision_pos": Decimal("0"),
+            })
+            key = (row["marca_id"], row["producto_id"])
+            item = products.setdefault(key, {
+                "marca_id": row["marca_id"], "marca": row["nombre_marca"],
+                "producto_id": row["producto_id"], "producto": row["nombre"], "sku": row["sku"],
+                "cantidad": 0, "bruto": Decimal("0"),
+                "metodos": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0")},
+                "comision_pos": Decimal("0"),
+            })
+            method = str(row["metodo_reembolso"]).strip().lower()
+            method_key = "tarjeta" if method == "tarjeta" else "transferencia" if method == "transferencia" else "efectivo"
+            brand["ventas_brutas"] -= line_amount
+            brand["cantidad"] -= quantity
+            brand["por_metodo"][method_key] -= line_amount
+            item["cantidad"] -= quantity
+            item["bruto"] -= line_amount
+            item["metodos"][method_key] -= line_amount
+            local_day = row["fecha_devolucion"].replace(tzinfo=timezone.utc).astimezone(MANAGUA).date().isoformat()
+            day = daily_by_brand.setdefault((local_day, row["marca_id"]), {"fecha": local_day, "ventas_brutas": Decimal("0"), "cantidad": 0})
+            day["ventas_brutas"] -= line_amount
+            day["cantidad"] -= quantity
+
         for sale_id, lines in sale_lines.items():
             sale = sales[sale_id]
             if sale["total"] > sale["subtotal"]:
@@ -133,7 +179,6 @@ class LiquidacionesService:
                 products[(brand_id, product_id)]["comision_pos"] += fee_share
 
         collected = {method: Decimal("0") for method in ("efectivo", "tarjeta", "transferencia")}
-        selected_brands = set(brand_ids)
         for payment_row in payment_rows:
             method = str(payment_row["metodo"])
             if method not in collected:
@@ -145,6 +190,14 @@ class LiquidacionesService:
             for brand_id, amount in zip(weights_by_brand, allocations):
                 if not brand_ids or brand_id in selected_brands:
                     collected[method] += amount
+        for row in return_rows:
+            if row["estado_reembolso"] != "Reembolsado":
+                continue
+            if brand_ids and row["marca_id"] not in selected_brands:
+                continue
+            method = str(row["metodo_reembolso"]).strip().lower()
+            if method in collected:
+                collected[method] -= _decimal(row["monto_devuelto"])
         brands = []
         for brand in brand_map.values():
             commission = Decimal("0.00")

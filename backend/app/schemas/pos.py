@@ -46,9 +46,15 @@ class POSCommissionConfig(BaseModel):
     comision_tarjeta_porcentaje: Decimal = Field(ge=0, le=100, max_digits=5, decimal_places=2)
 
 
+class DevolucionVentaItemCreate(BaseModel):
+    venta_detalle_id: int = Field(gt=0)
+    cantidad: int = Field(gt=0, le=100000)
+
+
 class DevolucionVentaCreate(BaseModel):
     venta_id: int = Field(gt=0)
     motivo: str = Field(min_length=5, max_length=1000)
+    lineas: List[DevolucionVentaItemCreate] = Field(min_length=1, max_length=100)
 
 
 class ReembolsoVentaConfirm(BaseModel):

@@ -48,24 +48,17 @@ def sales_history(
     return POSService.list_sales(db, desde, hasta, marca_id, metodo_pago, buscar, pagina, por_pagina)
 
 
-@router.get("/devoluciones/pendientes")
-def returnable_sales(
-    buscar: str | None = Query(default=None, max_length=100),
+@router.get("/devoluciones/ventas")
+def sales_for_returns(
+    desde: date | None = None,
+    hasta: date | None = None,
+    codigo: str | None = Query(default=None, max_length=30),
+    producto: str | None = Query(default=None, max_length=100),
     pagina: int = Query(default=1, ge=1),
     por_pagina: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    return POSService.list_returnable_sales(db, buscar, pagina, por_pagina)
-
-
-@router.get("/devoluciones/historial")
-def returns_history(
-    buscar: str | None = Query(default=None, max_length=100),
-    pagina: int = Query(default=1, ge=1),
-    por_pagina: int = Query(default=25, ge=1, le=100),
-    db: Session = Depends(get_db),
-):
-    return POSService.list_returns(db, buscar, pagina, por_pagina)
+    return POSService.list_sales_for_returns(db, desde, hasta, codigo, producto, pagina, por_pagina)
 
 
 def _database_error_detail(exc: Exception) -> str:
@@ -81,7 +74,10 @@ def register_return(
     current_user: Usuario = Depends(get_current_user),
 ):
     try:
-        return POSService.register_return(db, payload.venta_id, payload.motivo, current_user.id)
+        return POSService.register_return(
+            db, payload.venta_id, payload.motivo,
+            [line.dict() for line in payload.lineas], current_user.id,
+        )
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_database_error_detail(exc)) from exc
 

@@ -153,8 +153,20 @@ class MarcasService:
             FROM venta_detalles vd
             JOIN productos p ON vd.producto_id = p.id
             JOIN ventas v ON vd.venta_id = v.id
+            JOIN estados e ON e.id=v.estado_id AND e.modulo='ventas' AND e.nombre='Facturada'
             WHERE v.fecha_venta >= date_trunc('month', CURRENT_DATE)
               AND v.fecha_venta < date_trunc('month', CURRENT_DATE) + interval '1 month'
+            GROUP BY p.marca_id
+        """)).all())
+        returns_by_brand = dict(db.execute(text("""
+            SELECT p.marca_id, COALESCE(sum(d.monto_devuelto),0)
+            FROM devoluciones_venta r
+            JOIN devoluciones_venta_detalles d ON d.devolucion_id=r.id
+            JOIN productos p ON p.id=d.producto_id
+            JOIN ventas v ON v.id=r.venta_id
+            JOIN estados e ON e.id=v.estado_id AND e.modulo='ventas' AND e.nombre='Facturada'
+            WHERE r.fecha_devolucion >= date_trunc('month', CURRENT_DATE)
+              AND r.fecha_devolucion < date_trunc('month', CURRENT_DATE) + interval '1 month'
             GROUP BY p.marca_id
         """)).all())
 
@@ -164,7 +176,7 @@ class MarcasService:
             banco = cuenta.banco if cuenta else None
             no_cuenta = cuenta.no_cuenta if cuenta else None
             sku_count = sku_counts.get(m.id, 0)
-            sales_sum = sales_by_brand.get(m.id, 0.0)
+            sales_sum = sales_by_brand.get(m.id, 0.0) - returns_by_brand.get(m.id, 0.0)
 
             results.append({
                 "id": m.id,
@@ -212,12 +224,25 @@ class MarcasService:
                 FROM venta_detalles vd
                 JOIN productos p ON vd.producto_id = p.id
                 JOIN ventas v ON vd.venta_id = v.id
+                JOIN estados e ON e.id=v.estado_id AND e.modulo='ventas' AND e.nombre='Facturada'
                 WHERE p.marca_id = :marca_id
                 AND v.fecha_venta >= date_trunc('month', CURRENT_DATE)
                 AND v.fecha_venta < date_trunc('month', CURRENT_DATE) + interval '1 month'
             """),
             {"marca_id": m.id}
         ).scalar() or 0.0
+        returns_sum = db.execute(text("""
+            SELECT COALESCE(sum(d.monto_devuelto),0)
+            FROM devoluciones_venta r
+            JOIN devoluciones_venta_detalles d ON d.devolucion_id=r.id
+            JOIN productos p ON p.id=d.producto_id
+            JOIN ventas v ON v.id=r.venta_id
+            JOIN estados e ON e.id=v.estado_id AND e.modulo='ventas' AND e.nombre='Facturada'
+            WHERE p.marca_id=:marca_id
+              AND r.fecha_devolucion >= date_trunc('month', CURRENT_DATE)
+              AND r.fecha_devolucion < date_trunc('month', CURRENT_DATE) + interval '1 month'
+        """), {"marca_id": m.id}).scalar() or 0.0
+        sales_sum -= returns_sum
 
         return {
             "id": m.id,

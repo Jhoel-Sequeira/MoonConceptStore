@@ -16,7 +16,9 @@ class ClientesService:
         rows = db.execute(text(f"""
             SELECT c.id, c.nombre_cliente, c.telefono, c.correo, c.fecha_nacimiento,
                    COUNT(CASE WHEN e.modulo = 'ventas' AND e.nombre = 'Facturada' THEN v.id END) AS cantidad_compras,
-                   COALESCE(SUM(CASE WHEN e.modulo = 'ventas' AND e.nombre = 'Facturada' THEN v.total ELSE 0 END), 0) AS total_compras
+                   COALESCE(SUM(CASE WHEN e.modulo = 'ventas' AND e.nombre = 'Facturada' THEN v.total - COALESCE((
+                     SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id
+                   ),0) ELSE 0 END), 0) AS total_compras
             FROM clientes c
             LEFT JOIN ventas v ON v.cliente_id = c.id
             LEFT JOIN estados e ON e.id = v.estado_id
@@ -73,7 +75,9 @@ class ClientesService:
         row = db.execute(text("""
             SELECT c.id, c.nombre_cliente, c.telefono, c.correo, c.fecha_nacimiento,
                    COUNT(CASE WHEN e.modulo = 'ventas' AND e.nombre = 'Facturada' THEN v.id END) AS cantidad_compras,
-                   COALESCE(SUM(CASE WHEN e.modulo = 'ventas' AND e.nombre = 'Facturada' THEN v.total ELSE 0 END), 0) AS total_compras
+                   COALESCE(SUM(CASE WHEN e.modulo = 'ventas' AND e.nombre = 'Facturada' THEN v.total - COALESCE((
+                     SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id
+                   ),0) ELSE 0 END), 0) AS total_compras
             FROM clientes c
             LEFT JOIN ventas v ON v.cliente_id = c.id
             LEFT JOIN estados e ON e.id = v.estado_id

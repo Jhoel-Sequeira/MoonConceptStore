@@ -8,61 +8,102 @@ const invoiceLabel = (id) => `#${String(id).padStart(6, '0')}`;
 const formatDate = (value) => value
   ? new Intl.DateTimeFormat('es-NI', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Managua' }).format(new Date(value))
   : '—';
+const estimateLineRefund = (item, quantity) => {
+  if (!quantity) return 0;
+  const remainingAmount = Number(item.subtotal || 0) - Number(item.monto_devuelto || 0);
+  if (quantity === Number(item.cantidad_disponible)) return remainingAmount;
+  return Math.round(Number(item.subtotal || 0) * quantity / Number(item.cantidad_vendida) * 100) / 100;
+};
 
 export default function DevolucionesPage() {
-  const { notify } = useFeedback();
-  const [view, setView] = useState('pendientes');
-  const [search, setSearch] = useState('');
+  const { confirm, notify } = useFeedback();
+  const [filters, setFilters] = useState({ desde: '', hasta: '', codigo: '', producto: '' });
+  const [activeFilters, setActiveFilters] = useState(filters);
   const [page, setPage] = useState(1);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [result, setResult] = useState({ total: 0, ventas: [], devoluciones: [] });
+  const [result, setResult] = useState({ total: 0, ventas: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [selectedSale, setSelectedSale] = useState(null);
+  const [expandedSaleId, setExpandedSaleId] = useState(null);
+  const [quantities, setQuantities] = useState({});
   const [reason, setReason] = useState('');
-  const [confirmed, setConfirmed] = useState(false);
   const [selectedRefund, setSelectedRefund] = useState(null);
-  const [reference, setReference] = useState('');
+  const [refundReference, setRefundReference] = useState('');
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
     const timer = window.setTimeout(async () => {
       setLoading(true);
       try {
-        const params = { buscar: search.trim(), pagina: page, por_pagina: PAGE_SIZE };
-        const data = view === 'pendientes'
-          ? await posService.getReturnableSales(params)
-          : await posService.getReturns(params);
+        const data = await posService.getSalesForReturns({
+          ...activeFilters,
+          pagina: page,
+          por_pagina: PAGE_SIZE,
+        });
         if (active) {
           setResult(data);
           setError('');
         }
       } catch (err) {
-        if (active) setError(err.response?.data?.detail || 'No se pudo cargar el módulo de devoluciones.');
+        if (active) setError(err.response?.data?.detail || 'No se pudo cargar la lista de ventas.');
       } finally {
         if (active) setLoading(false);
       }
-    }, search.trim() ? 220 : 0);
+    }, 150);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [view, search, page, refreshKey]);
+  }, [activeFilters, page, refreshKey]);
 
-  const openReturn = (sale) => {
-    setSelectedSale(sale);
-    setReason('');
-    setConfirmed(false);
+  const applyFilters = (event) => {
+    event.preventDefault();
+    setPage(1);
+    setActiveFilters({ ...filters });
+    setExpandedSaleId(null);
   };
 
-  const submitReturn = async (event) => {
-    event.preventDefault();
-    if (!selectedSale || !confirmed || reason.trim().length < 5) return;
+  const clearFilters = () => {
+    const empty = { desde: '', hasta: '', codigo: '', producto: '' };
+    setFilters(empty);
+    setActiveFilters(empty);
+    setPage(1);
+    setExpandedSaleId(null);
+  };
+
+  const toggleDetails = (sale) => {
+    setExpandedSaleId((current) => current === sale.id ? null : sale.id);
+    setQuantities({});
+    setReason('');
+  };
+
+  const selectedLines = (sale) => (sale.items || [])
+    .map((item) => ({ item, cantidad: Number(quantities[item.venta_detalle_id] || 0) }))
+    .filter(({ cantidad }) => cantidad > 0);
+
+  const refundEstimate = (sale) => selectedLines(sale)
+    .reduce((sum, { item, cantidad }) => sum + estimateLineRefund(item, cantidad), 0);
+
+  const submitReturn = async (sale) => {
+    const lines = selectedLines(sale);
+    const units = lines.reduce((sum, line) => sum + line.cantidad, 0);
+    if (!lines.length || reason.trim().length < 5) return;
+    const amount = refundEstimate(sale);
+    if (!(await confirm(
+      `Se repondrán ${units} unidad${units === 1 ? '' : 'es'} y el reembolso quedará pendiente por ${formatCordobas(amount)}.`,
+      { title: `Devolución de factura ${invoiceLabel(sale.id)}`, confirmLabel: 'Registrar devolución' },
+    ))) return;
+
     setBusy(true);
     try {
-      const created = await posService.registerReturn({ venta_id: selectedSale.id, motivo: reason.trim() });
-      notify(`Devolución registrada. Reembolso pendiente: ${formatCordobas(created.monto_reembolso)}.`, 'success');
-      setSelectedSale(null);
-      setView('historial');
-      setPage(1);
+      const created = await posService.registerReturn({
+        venta_id: sale.id,
+        motivo: reason.trim(),
+        lineas: lines.map(({ item, cantidad }) => ({ venta_detalle_id: item.venta_detalle_id, cantidad })),
+      });
+      notify(`Devolución registrada por ${formatCordobas(created.monto_reembolso)}.`, 'success');
+      setExpandedSaleId(null);
+      setQuantities({});
+      setReason('');
+      setRefreshKey((key) => key + 1);
     } catch (err) {
       notify(err.response?.data?.detail || 'No se pudo registrar la devolución.', 'error');
     } finally {
@@ -72,14 +113,13 @@ export default function DevolucionesPage() {
 
   const submitRefund = async (event) => {
     event.preventDefault();
-    if (!selectedRefund || reference.trim().length < 3) return;
+    if (!selectedRefund || refundReference.trim().length < 3) return;
     setBusy(true);
     try {
-      await posService.confirmRefund(selectedRefund.id, { referencia: reference.trim() });
+      await posService.confirmRefund(selectedRefund.id, { referencia: refundReference.trim() });
       notify('Reembolso marcado como realizado.', 'success');
       setSelectedRefund(null);
-      setReference('');
-      setPage(1);
+      setRefundReference('');
       setRefreshKey((key) => key + 1);
     } catch (err) {
       notify(err.response?.data?.detail || 'No se pudo confirmar el reembolso.', 'error');
@@ -89,7 +129,6 @@ export default function DevolucionesPage() {
   };
 
   const totalPages = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
-  const rows = view === 'pendientes' ? result.ventas || [] : result.devoluciones || [];
 
   return (
     <div className="flex w-full flex-col gap-space-lg">
@@ -97,98 +136,122 @@ export default function DevolucionesPage() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Ventas · Control de caja</p>
           <h1 className="mt-1 font-headline-md text-headline-md text-on-surface">Devoluciones</h1>
-          <p className="mt-1 text-sm text-on-surface-variant">Registra devoluciones completas y controla el reembolso al cliente.</p>
+          <p className="mt-1 text-sm text-on-surface-variant">Busca una factura, revisa sus productos y elige cuántas unidades devolver.</p>
         </div>
         <div className="rounded-xl bg-primary-fixed/50 px-4 py-3 text-sm text-on-surface">
-          <span className="block text-xs text-on-surface-variant">Flujo</span>
-          <strong>Anular venta · reponer inventario · reembolsar</strong>
+          <span className="block text-xs text-on-surface-variant">Devoluciones registradas</span>
+          <strong>{result.total} facturas encontradas</strong>
         </div>
       </header>
 
       {error && <div role="alert" className="rounded-lg bg-error-container p-3 text-sm text-error">{error}</div>}
 
       <section className="overflow-hidden rounded-xl bg-surface-container-lowest shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-surface-container-low p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex gap-1 border-b border-surface-container-low sm:border-0">
-            {[['pendientes', 'Ventas por devolver'], ['historial', 'Historial']].map(([key, label]) => (
-              <button key={key} type="button" onClick={() => { setView(key); setPage(1); }} aria-current={view === key ? 'page' : undefined}
-                className={`border-b-2 px-3 py-2 text-sm font-semibold ${view === key ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <label className="relative w-full sm:max-w-sm">
-            <span className="sr-only">Buscar factura, cliente o producto</span>
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-lg text-on-surface-variant">search</span>
-            <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Factura, cliente o producto"
-              className="w-full rounded-lg border border-outline-variant py-2 pl-10 pr-3 text-sm outline-none focus:border-primary" />
+        <form onSubmit={applyFilters} className="grid gap-3 border-b border-surface-container-low p-4 sm:grid-cols-2 xl:grid-cols-5 xl:items-end">
+          <label className="text-xs font-semibold text-on-surface-variant">Desde
+            <input type="date" value={filters.desde} max={filters.hasta || undefined} onChange={(event) => setFilters({ ...filters, desde: event.target.value })} className="mt-1 block w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" />
           </label>
-        </div>
-
-        {loading ? <div className="p-6"><SplashScreen compact message="Cargando devoluciones..." /></div> : rows.length === 0 ? (
-          <div className="p-10 text-center">
-            <span className="material-symbols-outlined text-4xl text-primary/50">assignment_return</span>
-            <p className="mt-2 font-semibold text-on-surface">{view === 'pendientes' ? 'No hay ventas disponibles para devolver' : 'Aún no hay devoluciones registradas'}</p>
-            <p className="mt-1 text-sm text-on-surface-variant">{search ? 'Prueba con otro término de búsqueda.' : 'Las ventas anuladas aparecerán en el historial.'}</p>
+          <label className="text-xs font-semibold text-on-surface-variant">Hasta
+            <input type="date" value={filters.hasta} min={filters.desde || undefined} onChange={(event) => setFilters({ ...filters, hasta: event.target.value })} className="mt-1 block w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" />
+          </label>
+          <label className="text-xs font-semibold text-on-surface-variant">Código de factura
+            <input inputMode="numeric" value={filters.codigo} onChange={(event) => setFilters({ ...filters, codigo: event.target.value })} placeholder="000039" className="mt-1 block w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" />
+          </label>
+          <label className="text-xs font-semibold text-on-surface-variant">Producto o SKU
+            <input value={filters.producto} onChange={(event) => setFilters({ ...filters, producto: event.target.value })} placeholder="Nombre o código del producto" className="mt-1 block w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" />
+          </label>
+          <div className="flex gap-2">
+            <button type="submit" className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary">Buscar</button>
+            <button type="button" onClick={clearFilters} className="rounded-lg border border-outline-variant px-3 py-2 text-sm font-semibold text-on-surface">Limpiar</button>
           </div>
-        ) : view === 'pendientes' ? (
-          <div className="divide-y divide-surface-container-low">
-            {rows.map((sale) => <article key={sale.id} className="p-4 sm:p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        </form>
+
+        {loading ? <div className="p-6"><SplashScreen compact message="Cargando ventas..." /></div> : result.ventas.length === 0 ? (
+          <div className="p-10 text-center">
+            <span className="material-symbols-outlined text-4xl text-primary/50">receipt_long</span>
+            <p className="mt-2 font-semibold text-on-surface">No hay ventas que coincidan</p>
+            <p className="mt-1 text-sm text-on-surface-variant">Cambia las fechas o los filtros de factura y producto.</p>
+          </div>
+        ) : <div className="divide-y divide-surface-container-low">
+          {result.ventas.map((sale) => {
+            const expanded = expandedSaleId === sale.id;
+            const canReturn = sale.estado_venta === 'Facturada' && Number(sale.items?.reduce((sum, item) => sum + Number(item.cantidad_disponible || 0), 0)) > 0;
+            const lines = selectedLines(sale);
+            const selectedUnits = lines.reduce((sum, line) => sum + line.cantidad, 0);
+            return <article key={sale.id} className="p-4 sm:p-5">
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="font-bold text-on-surface">Factura {invoiceLabel(sale.id)}</h2>
-                    <span className="rounded-full bg-surface-container-low px-2.5 py-1 text-xs font-semibold text-on-surface-variant">{sale.metodo_pago}</span>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${sale.estado_devolucion === 'Sin devolución' ? 'bg-surface-container-low text-on-surface-variant' : sale.estado_devolucion === 'Parcial' ? 'bg-amber-100 text-amber-900' : 'bg-tertiary-fixed text-on-tertiary-fixed-variant'}`}>
+                      {sale.estado_devolucion}
+                    </span>
                   </div>
-                  <p className="mt-1 text-sm text-on-surface-variant">{sale.cliente} · {formatDate(sale.fecha_venta)}</p>
+                  <p className="mt-1 truncate text-sm text-on-surface-variant">{formatDate(sale.fecha_venta)} · {sale.cliente} · {sale.metodo_pago}</p>
+                  {Number(sale.monto_devuelto) > 0 && <p className="mt-1 text-xs text-on-surface-variant">Devuelto: {formatCordobas(sale.monto_devuelto)}{sale.reembolso_pendiente ? ' · reembolso pendiente' : ''}</p>}
                 </div>
                 <div className="flex items-center justify-between gap-3 sm:justify-end">
                   <strong className="font-mono text-lg text-primary">{formatCordobas(sale.total)}</strong>
-                  <button type="button" onClick={() => openReturn(sale)} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary hover:opacity-90">
-                    Registrar devolución
+                  <button type="button" onClick={() => toggleDetails(sale)} aria-expanded={expanded} className="inline-flex items-center gap-1 rounded-lg border border-primary px-3 py-2 text-sm font-semibold text-primary hover:bg-primary-fixed/40">
+                    <span className="material-symbols-outlined text-lg">{expanded ? 'expand_less' : 'receipt_long'}</span>
+                    {expanded ? 'Ocultar detalle' : 'Ver detalle'}
                   </button>
                 </div>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {(sale.items || []).map((item) => <span key={item.producto_id} className="rounded-lg bg-surface-container-low px-2.5 py-1.5 text-xs text-on-surface">
-                  {item.cantidad} × {item.producto} <strong className="ml-1">{formatCordobas(item.subtotal)}</strong>
-                </span>)}
-              </div>
-            </article>)}
-          </div>
-        ) : (
-          <div className="divide-y divide-surface-container-low">
-            {rows.map((row) => <article key={row.id} className="p-4 sm:p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="font-bold text-on-surface">Factura {invoiceLabel(row.venta_id)}</h2>
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${row.estado_reembolso === 'Reembolsado' ? 'bg-tertiary-fixed text-on-tertiary-fixed-variant' : 'bg-amber-100 text-amber-900'}`}>
-                      {row.estado_reembolso === 'Reembolsado' ? 'Reembolsado' : 'Reembolso pendiente'}
-                    </span>
+
+              {expanded && <div className="mt-4 rounded-xl border border-surface-container-high bg-surface-container-low/30 p-3 sm:p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div><h3 className="font-semibold text-on-surface">Productos de la factura</h3><p className="text-xs text-on-surface-variant">Indica cuántas unidades de cada producto deseas devolver.</p></div>
+                  {!canReturn && <span className="rounded-full bg-surface-container-low px-3 py-1 text-xs font-semibold text-on-surface-variant">Esta factura ya no tiene unidades disponibles</span>}
+                </div>
+                <div className="flex flex-col divide-y divide-surface-container-high rounded-lg border border-surface-container-high bg-white">
+                  {(sale.items || []).map((item) => {
+                    const available = Number(item.cantidad_disponible || 0);
+                    const quantity = Number(quantities[item.venta_detalle_id] || 0);
+                    const refund = estimateLineRefund(item, quantity);
+                    return <div key={item.venta_detalle_id} className="grid gap-2 p-3 sm:grid-cols-[1fr_auto_auto] sm:items-center">
+                      <div className="min-w-0"><p className="truncate text-sm font-semibold text-on-surface">{item.producto}</p><p className="text-xs text-on-surface-variant">{item.sku || 'Sin SKU'} · Vendidas {item.cantidad_vendida} · Devueltas {item.cantidad_devuelta} · Disponibles {available}</p></div>
+                      <span className="text-sm font-semibold text-on-surface sm:text-right">{formatCordobas(item.subtotal)}</span>
+                      <label className="flex items-center gap-2 text-xs font-semibold text-on-surface-variant">Devolver
+                        <input type="number" min="0" max={available} step="1" value={quantities[item.venta_detalle_id] || ''} disabled={!canReturn || available < 1 || busy}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setQuantities((current) => ({
+                              ...current,
+                              [item.venta_detalle_id]: value === '' ? '' : String(Math.min(available, Math.max(0, Math.trunc(Number(value) || 0)))),
+                            }));
+                          }}
+                          className="w-20 rounded-md border border-outline-variant px-2 py-1.5 text-center text-sm text-on-surface outline-none focus:border-primary disabled:bg-surface-container-low" />
+                      </label>
+                      {quantity > 0 && <p className="text-right text-xs text-on-surface-variant sm:col-span-3">Reembolso estimado: {formatCordobas(refund)}</p>}
+                    </div>;
+                  })}
+                </div>
+                {canReturn && <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                  <label className="text-sm font-semibold text-on-surface">Motivo
+                    <textarea rows={2} maxLength={1000} value={reason} disabled={busy} onChange={(event) => setReason(event.target.value)} placeholder="Ej. Producto no era lo que buscaba" className="mt-1 block w-full rounded-lg border border-outline-variant px-3 py-2 font-normal outline-none focus:border-primary disabled:bg-surface-container-low" />
+                  </label>
+                  <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-end">
+                    <div className="text-right"><p className="text-xs text-on-surface-variant">{selectedUnits} unidades</p><strong className="font-mono text-primary">{formatCordobas(refundEstimate(sale))}</strong></div>
+                    <button type="button" disabled={busy || !lines.length || reason.trim().length < 5} onClick={() => submitReturn(sale)} className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary disabled:opacity-50">{busy ? 'Registrando…' : 'Registrar devolución'}</button>
                   </div>
-                  <p className="mt-1 text-sm text-on-surface-variant">{row.cliente} · {formatDate(row.fecha_devolucion)} · {row.metodo_reembolso}</p>
-                  <p className="mt-1 text-sm text-on-surface-variant">Motivo: {row.motivo}</p>
-                </div>
-                <div className="flex items-center justify-between gap-3 sm:justify-end">
-                  <strong className="font-mono text-lg text-primary">{formatCordobas(row.monto_reembolso)}</strong>
-                  {row.estado_reembolso === 'Pendiente' && <button type="button" onClick={() => { setSelectedRefund(row); setReference(''); }} className="rounded-lg border border-primary px-3 py-2 text-sm font-semibold text-primary hover:bg-primary-fixed/40">
-                    Registrar reembolso
-                  </button>}
-                </div>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {(row.items || []).map((item) => <span key={item.producto_id} className="rounded-lg bg-surface-container-low px-2.5 py-1.5 text-xs text-on-surface">
-                  {item.cantidad} × {item.producto} <strong className="ml-1">{formatCordobas(item.monto_devuelto)}</strong>
-                </span>)}
-              </div>
-              {row.estado_reembolso === 'Reembolsado' && <p className="mt-3 text-xs text-on-surface-variant">Ref. {row.reembolso_referencia} · {formatDate(row.reembolsado_en)}{row.reembolso_registrado_por ? ` · ${row.reembolso_registrado_por}` : ''}</p>}
-            </article>)}
-          </div>
-        )}
+                </div>}
+                {sale.historial_devoluciones?.length > 0 && <section className="mt-4 border-t border-surface-container-high pt-3">
+                  <h4 className="text-sm font-semibold text-on-surface">Devoluciones registradas</h4>
+                  <div className="mt-2 divide-y divide-surface-container-high rounded-lg border border-surface-container-high bg-white">
+                    {sale.historial_devoluciones.map((entry) => <div key={entry.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div><p className="text-sm font-medium text-on-surface">{formatCordobas(entry.monto)} · {entry.metodo}</p><p className="text-xs text-on-surface-variant">{formatDate(entry.fecha)} · {entry.estado === 'Reembolsado' ? `Ref. ${entry.referencia || 'registrada'} · ${formatDate(entry.reembolsado_en)}` : 'Reembolso pendiente'}</p></div>
+                      {entry.estado === 'Pendiente' && <button type="button" disabled={busy} onClick={() => { setSelectedRefund(entry); setRefundReference(''); }} className="self-start rounded-lg border border-primary px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary-fixed/40 sm:self-auto">Registrar reembolso</button>}
+                    </div>)}
+                  </div>
+                </section>}
+              </div>}
+            </article>;
+          })}
+        </div>}
 
         {!loading && result.total > PAGE_SIZE && <div className="flex items-center justify-between border-t border-surface-container-low p-4 text-sm">
-          <span>Página {page} de {totalPages} · {result.total} registros</span>
+          <span>Página {page} de {totalPages} · {result.total} facturas</span>
           <div className="flex gap-2">
             <button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="rounded-lg border border-outline-variant px-3 py-1.5 disabled:opacity-40">Anterior</button>
             <button type="button" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)} className="rounded-lg border border-outline-variant px-3 py-1.5 disabled:opacity-40">Siguiente</button>
@@ -196,37 +259,17 @@ export default function DevolucionesPage() {
         </div>}
       </section>
 
-      {selectedSale && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
-        <form role="dialog" aria-modal="true" aria-labelledby="return-sale-title" onSubmit={submitReturn} className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-surface-container-lowest p-5 shadow-2xl sm:p-6">
-          <h2 id="return-sale-title" className="text-lg font-bold text-on-surface">Devolver factura {invoiceLabel(selectedSale.id)}</h2>
-          <p className="mt-1 text-sm text-on-surface-variant">{selectedSale.cliente} · {formatCordobas(selectedSale.total)} · {selectedSale.metodo_pago}</p>
-          <div className="mt-4 rounded-xl bg-surface-container-low p-3 text-sm">
-            {(selectedSale.items || []).map((item) => <div key={item.producto_id} className="flex justify-between gap-3 py-1"><span>{item.cantidad} × {item.producto}</span><strong>{formatCordobas(item.subtotal)}</strong></div>)}
-            <div className="mt-2 flex justify-between border-t border-surface-container-high pt-2 font-bold"><span>Devolución total</span><span>{formatCordobas(selectedSale.total)}</span></div>
-          </div>
-          <label className="mt-4 block text-sm font-semibold text-on-surface">Motivo de devolución
-            <textarea required minLength={5} maxLength={1000} rows={3} value={reason} onChange={(event) => setReason(event.target.value)} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 font-normal outline-none focus:border-primary" placeholder="Ej. Venta registrada por error" />
-          </label>
-          <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-950">Se anulará toda la factura y se repondrán todas las unidades. El reembolso quedará pendiente hasta que se entregue el dinero al cliente.</div>
-          <label className="mt-3 flex items-start gap-2 text-sm text-on-surface"><input required type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1 accent-primary" />Confirmo la devolución completa y la reposición de estos productos.</label>
-          <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button type="button" disabled={busy} onClick={() => setSelectedSale(null)} className="rounded-lg border border-outline-variant px-4 py-2 text-sm font-semibold">Cancelar</button>
-            <button type="submit" disabled={busy || !confirmed || reason.trim().length < 5} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-50">{busy ? 'Registrando…' : 'Confirmar devolución'}</button>
-          </div>
-        </form>
-      </div>}
-
       {selectedRefund && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
-        <form role="dialog" aria-modal="true" aria-labelledby="confirm-refund-title" onSubmit={submitRefund} className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-5 shadow-2xl sm:p-6">
-          <h2 id="confirm-refund-title" className="text-lg font-bold text-on-surface">Confirmar reembolso</h2>
-          <p className="mt-1 text-sm text-on-surface-variant">Factura {invoiceLabel(selectedRefund.venta_id)} · {formatCordobas(selectedRefund.monto_reembolso)}</p>
+        <form role="dialog" aria-modal="true" aria-labelledby="refund-title" onSubmit={submitRefund} className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-5 shadow-2xl sm:p-6">
+          <h2 id="refund-title" className="text-lg font-bold text-on-surface">Confirmar reembolso</h2>
+          <p className="mt-1 text-sm text-on-surface-variant">Factura {invoiceLabel(selectedRefund.venta_id)} · {formatCordobas(selectedRefund.monto)}</p>
           <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-950">Confirma solo después de entregar el dinero o completar la transferencia.</p>
           <label className="mt-4 block text-sm font-semibold text-on-surface">Referencia o comprobante
-            <input required minLength={3} maxLength={120} value={reference} onChange={(event) => setReference(event.target.value)} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 font-normal outline-none focus:border-primary" placeholder="N.º de transferencia o recibo" />
+            <input required minLength={3} maxLength={120} value={refundReference} onChange={(event) => setRefundReference(event.target.value)} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 font-normal outline-none focus:border-primary" placeholder="N.º de transferencia o recibo" />
           </label>
           <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button type="button" disabled={busy} onClick={() => setSelectedRefund(null)} className="rounded-lg border border-outline-variant px-4 py-2 text-sm font-semibold">Cancelar</button>
-            <button type="submit" disabled={busy || reference.trim().length < 3} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-50">{busy ? 'Guardando…' : 'Marcar reembolsado'}</button>
+            <button type="submit" disabled={busy || refundReference.trim().length < 3} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-50">{busy ? 'Guardando…' : 'Marcar reembolsado'}</button>
           </div>
         </form>
       </div>}
