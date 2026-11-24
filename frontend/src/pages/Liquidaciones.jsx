@@ -23,7 +23,7 @@ function buildBrandStatementHtml(brand, period, settlement, productRows, metadat
   const productTable = productRows.map((item, index) => `<tr>
     <td class="number">${index + 1}</td><td>${escapeHtml(item.sku || '—')}</td><td><strong>${escapeHtml(item.producto)}</strong></td><td class="number">${escapeHtml(item.cantidad)}</td>
     <td class="number">${money(item.bruto)}</td><td class="number">${money(item.metodos.efectivo)}</td>
-    <td class="number">${money(item.metodos.tarjeta)}</td><td class="number">${money(item.metodos.transferencia)}</td><td class="number">${money(item.metodos.cuenta_marca)}</td>
+    <td class="number">${money(item.metodos.tarjeta)}</td><td class="number">${money(item.metodos.transferencia)}</td><td class="number">${money(item.metodos.credito)}</td><td class="number">${money(item.metodos.cuenta_marca)}</td>
     <td class="number">${money(item.comision_pos)}</td>
     <td class="number net">${money(item.neto_marca)}</td>
   </tr>`).join('');
@@ -44,7 +44,7 @@ function buildBrandStatementHtml(brand, period, settlement, productRows, metadat
     <div class="statusbar"><div><div class="label">Estado de liquidación</div><div class="status-text">${escapeHtml(paymentInfo)}</div></div><span class="status">${escapeHtml(status)}</span></div>
     <section class="cards"><article class="card"><small>Ventas brutas</small><strong>${money(brand.ventas_brutas)}</strong></article><article class="card"><small>Compras descontadas</small><strong>${money(brand.total_deducciones_marca)}</strong></article><article class="card net"><small>Neto para la marca</small><strong>${money(brand.neto_pagar)}</strong></article><article class="card"><small>Comisión terminal POS · a cargo de la marca</small><strong>${money(brand.comision_pos)}</strong></article></section>
     <div class="section-head"><div><h2>Detalle de productos</h2><p>Unidades vendidas: ${escapeHtml(brand.cantidad)}</p></div><p>Montos en córdobas</p></div>
-    <table><thead><tr><th class="number">#</th><th>SKU / código</th><th>Producto</th><th class="number">Unidades</th><th class="number">Bruto</th><th class="number">Efectivo</th><th class="number">Tarjeta</th><th class="number">Transferencia</th><th class="number">Cuenta marca</th><th class="number">POS</th><th class="number">Neto marca</th></tr></thead><tbody>${productTable || '<tr><td colspan="11">No hay detalle de productos en este período.</td></tr>'}</tbody></table>
+    <table><thead><tr><th class="number">#</th><th>SKU / código</th><th>Producto</th><th class="number">Unidades</th><th class="number">Bruto</th><th class="number">Efectivo</th><th class="number">Tarjeta</th><th class="number">Transferencia</th><th class="number">Cr?dito</th><th class="number">Cuenta marca</th><th class="number">POS</th><th class="number">Neto marca</th></tr></thead><tbody>${productTable || '<tr><td colspan="12">No hay detalle de productos en este período.</td></tr>'}</tbody></table>
     <footer class="foot"><span><strong>Moon Concept Store</strong><br>Reporte preparado para ${escapeHtml(brand.marca)} · ${escapeHtml(todayLocal())}</span><span>La comisión POS se deduce del neto correspondiente a la marca.</span></footer>
     </main></body></html>`;
 }
@@ -182,9 +182,9 @@ export default function LiquidacionesPage() {
 
   const exportCsv = () => {
     if (!report || !rows.length) return;
-    const columns = ['Período del reporte', 'Marca', 'Unidades', 'Ventas brutas', 'Compras descontadas', 'Neto marca', 'Comisión terminal POS', 'Efectivo', 'Tarjeta', 'Transferencia', 'Cuenta de marca', 'Estado', 'Fecha pago', 'Referencia'];
+    const columns = ['Período del reporte', 'Marca', 'Unidades', 'Ventas brutas', 'Compras descontadas', 'Neto marca', 'Comisión terminal POS', 'Efectivo', 'Tarjeta', 'Transferencia', 'Cr?dito', 'Cuenta de marca', 'Estado', 'Fecha pago', 'Referencia'];
     const values = rows.map((row) => [report.periodo, row.marca, row.cantidad, row.ventas_brutas, row.total_deducciones_marca, row.neto_pagar, row.comision_pos,
-      row.por_metodo.efectivo, row.por_metodo.tarjeta, row.por_metodo.transferencia, row.por_metodo.cuenta_marca,
+      row.por_metodo.efectivo, row.por_metodo.tarjeta, row.por_metodo.transferencia, row.por_metodo.credito, row.por_metodo.cuenta_marca,
       row.settlement?.estado || 'Sin liquidar', row.settlement?.fecha_pago || '', row.settlement?.referencia_pago || '']);
     const csv = [columns, ...values].map((line) => line.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
     const link = document.createElement('a');
@@ -320,9 +320,9 @@ export default function LiquidacionesPage() {
 
         <section className="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
           <div className="p-5 border-b border-surface-container-low"><h2 className="font-bold text-on-surface">Ventas por producto y método</h2><p className="text-xs text-on-surface-variant">El cliente paga el precio del artículo; la comisión POS se descuenta del neto de la marca.</p></div>
-          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="bg-surface-container-low text-xs uppercase text-on-surface-variant"><th className="p-3">Marca</th><th className="p-3">Producto</th><th className="p-3 text-right">Unidades</th><th className="p-3 text-right">Bruto</th><th className="p-3 text-right">Efectivo</th><th className="p-3 text-right">Tarjeta</th><th className="p-3 text-right">Transferencia</th><th className="p-3 text-right">Cuenta de marca</th><th className="p-3 text-right">POS</th></tr></thead><tbody className="divide-y divide-surface-container-low">
-            {(report.por_producto || []).map((item) => <tr key={`${item.marca_id}-${item.producto_id}`}><td className="p-3">{item.marca}</td><td className="p-3 font-medium">{item.producto}</td><td className="p-3 text-right">{item.cantidad}</td><td className="p-3 text-right">{formatCordobas(item.bruto)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.efectivo)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.tarjeta)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.transferencia)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.cuenta_marca)}</td><td className="p-3 text-right">{formatCordobas(item.comision_pos)}</td></tr>)}
-            {!report.por_producto?.length && <tr><td colSpan="9" className="p-6 text-center text-on-surface-variant">Sin ventas de productos en este mes.</td></tr>}
+          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="bg-surface-container-low text-xs uppercase text-on-surface-variant"><th className="p-3">Marca</th><th className="p-3">Producto</th><th className="p-3 text-right">Unidades</th><th className="p-3 text-right">Bruto</th><th className="p-3 text-right">Efectivo</th><th className="p-3 text-right">Tarjeta</th><th className="p-3 text-right">Transferencia</th><th className="p-3 text-right">Cr?dito</th><th className="p-3 text-right">Cuenta de marca</th><th className="p-3 text-right">POS</th></tr></thead><tbody className="divide-y divide-surface-container-low">
+            {(report.por_producto || []).map((item) => <tr key={`${item.marca_id}-${item.producto_id}`}><td className="p-3">{item.marca}</td><td className="p-3 font-medium">{item.producto}</td><td className="p-3 text-right">{item.cantidad}</td><td className="p-3 text-right">{formatCordobas(item.bruto)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.efectivo)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.tarjeta)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.transferencia)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.credito)}</td><td className="p-3 text-right">{formatCordobas(item.metodos.cuenta_marca)}</td><td className="p-3 text-right">{formatCordobas(item.comision_pos)}</td></tr>)}
+            {!report.por_producto?.length && <tr><td colSpan="10" className="p-6 text-center text-on-surface-variant">Sin ventas de productos en este mes.</td></tr>}
           </tbody></table></div>
         </section>
       </>)}

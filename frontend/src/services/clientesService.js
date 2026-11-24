@@ -6,6 +6,8 @@ const clientesService = {
     return response.data;
   },
   getById: async (id) => (await api.get(`/clientes/${id}`)).data,
+  getCreditAccount: async (id) => (await api.get(`/clientes/${id}/cuentas`)).data,
+  registerPayment: async (id, payment) => (await api.post(`/clientes/${id}/abonos`, payment)).data,
   create: async (data) => (await api.post('/clientes/', data)).data,
   update: async (id, data) => (await api.put(`/clientes/${id}`, data)).data,
 };

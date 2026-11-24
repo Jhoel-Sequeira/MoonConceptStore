@@ -3,6 +3,8 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 from pydantic import validator
+from decimal import Decimal
+from typing import Literal
 
 
 class ClienteCreate(BaseModel):
@@ -20,3 +22,10 @@ class ClienteCreate(BaseModel):
 
 class ClienteUpdate(ClienteCreate):
     pass
+
+
+class AbonoClienteCreate(BaseModel):
+    cuenta_id: int = Field(gt=0)
+    monto: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    metodo_pago: Literal["Efectivo", "Tarjeta", "Transferencia"]
+    referencia: str | None = Field(default=None, max_length=120)

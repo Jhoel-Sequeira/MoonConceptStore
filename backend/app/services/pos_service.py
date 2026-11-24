@@ -82,7 +82,7 @@ class POSService:
         """
         summary = db.execute(text(f"""
             SELECT count(*) AS transacciones,
-                   COALESCE(sum(CASE WHEN v.descontar_de_liquidacion THEN 0 ELSE v.total - COALESCE((SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id),0) END), 0) AS total_cobrado,
+                   COALESCE(sum(CASE WHEN v.descontar_de_liquidacion OR lower(trim(COALESCE(mp.metodo_pago,''))) = 'crédito' THEN 0 ELSE v.total - COALESCE((SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id),0) END), 0) AS total_cobrado,
                    COALESCE(sum((SELECT COALESCE(sum(vd.subtotal), 0) FROM venta_detalles vd WHERE vd.venta_id = v.id)
                      - COALESCE((SELECT sum(r.monto_reembolso) FROM devoluciones_venta r WHERE r.venta_id=v.id),0)), 0) AS ventas_productos,
                    COALESCE(sum(v.comision_pos), 0) AS comision_pos
@@ -334,6 +334,10 @@ class POSService:
             if not payment:
                 raise ValueError("El método de pago seleccionado no está configurado")
 
+            is_credit = payment.metodo_pago.strip().casefold() == "crédito"
+            if is_credit and (not sale_in.cliente_id or sale_in.marca_cliente_id or sale_in.descontar_de_liquidacion):
+                raise ValueError("El crédito requiere un cliente registrado y no aplica a facturas de marca")
+
             if sale_in.descontar_de_liquidacion and not sale_in.marca_cliente_id:
                 raise ValueError("Selecciona la marca para cargar la compra a su liquidación")
             if sale_in.descontar_de_liquidacion and payment.metodo_pago.strip().casefold() != "cuenta de marca":
@@ -393,6 +397,9 @@ class POSService:
                         {"name": customer_name},
                     ).scalar_one()
 
+            if is_credit and customer_name.strip().casefold() == "consumidor final":
+                raise ValueError("El crédito requiere seleccionar un cliente registrado")
+
             invoice_state_id = db.execute(
                 text("SELECT id FROM estados WHERE modulo = 'ventas' AND nombre = 'Facturada' ORDER BY id LIMIT 1")
             ).scalar()
@@ -424,6 +431,12 @@ class POSService:
                     INSERT INTO cargos_marca (venta_id, marca_id, monto)
                     VALUES (:sale_id, :brand_id, :amount)
                 """), {"sale_id": sale_id, "brand_id": brand["id"], "amount": total})
+
+            if is_credit:
+                db.execute(text("""
+                    INSERT INTO cuentas_cobrar_clientes (venta_id, cliente_id, monto_original)
+                    VALUES (:sale_id, :customer_id, :amount)
+                """), {"sale_id": sale_id, "customer_id": customer_id, "amount": total})
 
             db.execute(
                 text("""
@@ -473,6 +486,7 @@ class POSService:
                 "descuento_total": discount_total,
                 "comision_pos": commission,
                 "total": total,
+                "saldo_pendiente": total if is_credit else None,
                 "items": lines,
             }
         except Exception:

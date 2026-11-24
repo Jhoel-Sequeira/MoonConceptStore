@@ -41,6 +41,7 @@ class VentaResponse(BaseModel):
     descuento_total: Decimal
     comision_pos: Decimal
     total: Decimal
+    saldo_pendiente: Decimal | None = None
     items: List[VentaDetalleResponse]
 
 

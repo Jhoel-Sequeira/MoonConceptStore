@@ -645,9 +645,9 @@ export default function CatalogoQRPage() {
 
       {/* Modal: Registrar / Editar Producto */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3 sm:p-6">
-          <section role="dialog" aria-modal="true" aria-labelledby="product-editor-title" className="w-full max-w-4xl overflow-hidden rounded-2xl border border-outline-variant/20 bg-[#f8f0ec] shadow-2xl">
-            <form onSubmit={handleCreateSubmit}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/45 p-3 sm:items-center sm:p-6">
+          <section role="dialog" aria-modal="true" aria-labelledby="product-editor-title" className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-outline-variant/20 bg-[#f8f0ec] shadow-2xl sm:max-h-[calc(100dvh-3rem)]">
+            <form onSubmit={handleCreateSubmit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <header className="flex items-center gap-3 border-b border-outline-variant/20 px-5 py-4 sm:px-7">
                 <button type="button" onClick={() => { setIsModalOpen(false); setProductToEdit(null); }} aria-label="Volver" className="rounded-full p-1 text-on-surface-variant hover:bg-white/70">
                   <span className="material-symbols-outlined">arrow_back</span>
@@ -659,7 +659,8 @@ export default function CatalogoQRPage() {
                 <button type="button" onClick={() => { setIsModalOpen(false); setProductToEdit(null); }} aria-label="Cerrar" className="rounded-lg p-2 text-on-surface-variant hover:bg-white/70"><span className="material-symbols-outlined">close</span></button>
               </header>
 
-              <div className="grid gap-6 p-5 sm:p-7 md:grid-cols-[150px_minmax(0,1fr)]">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 sm:p-7">
+                <div className="grid gap-6 md:grid-cols-[150px_minmax(0,1fr)]">
                 <div className="flex flex-col gap-3">
                   <div className="aspect-square w-full overflow-hidden rounded-xl bg-[#eaded5] shadow-sm">
                     {visiblePhotoUrls[activePhotoIndex] ? <img src={activePhotoIndex >= storedPhotoUrls.length ? visiblePhotoUrls[activePhotoIndex] : inventarioService.getProductImageUrl(visiblePhotoUrls[activePhotoIndex])} alt="Vista del producto" className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-primary/50"><span className="material-symbols-outlined text-4xl">add_a_photo</span></div>}
@@ -752,9 +753,10 @@ export default function CatalogoQRPage() {
                     <button type="button" role="switch" aria-checked={Number(formData.estado_id) === 1} onClick={() => setFormData({ ...formData, estado_id: Number(formData.estado_id) === 1 ? 7 : 1 })} className={'relative h-6 w-11 rounded-full transition ' + (Number(formData.estado_id) === 1 ? 'bg-primary-fixed-dim' : 'bg-outline-variant/60')}><span className={'absolute top-1 h-4 w-4 rounded-full bg-white shadow transition ' + (Number(formData.estado_id) === 1 ? 'left-6' : 'left-1')} /></button>
                   </div>
                 </div>
+                </div>
               </div>
 
-              <footer className="flex justify-end gap-3 border-t border-outline-variant/20 px-5 py-4 sm:px-7">
+              <footer className="flex shrink-0 justify-end gap-3 border-t border-outline-variant/20 px-5 py-4 sm:px-7">
                 <button type="button" onClick={() => { setIsModalOpen(false); setProductToEdit(null); }} className="rounded-lg border border-outline-variant/30 px-5 py-2.5 text-sm text-on-surface-variant hover:bg-white/60">Cancelar</button>
                 <button type="submit" className="rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-on-primary shadow-sm hover:opacity-95">Guardar</button>
               </footer>

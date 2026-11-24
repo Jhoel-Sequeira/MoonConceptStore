@@ -130,17 +130,17 @@ class LiquidacionesService:
             brand = brand_map.setdefault(row["marca_id"], {
                 "marca_id": row["marca_id"], "marca": row["nombre_marca"],
                 "ventas_brutas": Decimal("0"), "cantidad": 0,
-                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "cuenta_marca": Decimal("0")},
+                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "credito": Decimal("0"), "cuenta_marca": Decimal("0")},
                 "comision_pos": Decimal("0"),
             })
             method = str(row["metodo_pago"]).strip().lower()
-            method_key = "cuenta_marca" if method == "cuenta de marca" else "tarjeta" if method == "tarjeta" else "transferencia" if method == "transferencia" else "efectivo"
+            method_key = "cuenta_marca" if method == "cuenta de marca" else "credito" if method == "crédito" else "tarjeta" if method == "tarjeta" else "transferencia" if method == "transferencia" else "efectivo"
             key = (row["marca_id"], row["producto_id"])
             item = products.setdefault(key, {
                 "marca_id": row["marca_id"], "marca": row["nombre_marca"],
                 "producto_id": row["producto_id"], "producto": row["nombre"], "sku": row["sku"],
                 "cantidad": 0, "bruto": Decimal("0"),
-                "metodos": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "cuenta_marca": Decimal("0")},
+                "metodos": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "credito": Decimal("0"), "cuenta_marca": Decimal("0")},
                 "comision_pos": Decimal("0"),
             })
             item["cantidad"] += int(row["cantidad"])
@@ -162,7 +162,7 @@ class LiquidacionesService:
             brand = brand_map.setdefault(row["marca_id"], {
                 "marca_id": row["marca_id"], "marca": row["nombre_marca"],
                 "ventas_brutas": Decimal("0"), "cantidad": 0,
-                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "cuenta_marca": Decimal("0")},
+                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "credito": Decimal("0"), "cuenta_marca": Decimal("0")},
                 "comision_pos": Decimal("0"),
             })
             key = (row["marca_id"], row["producto_id"])
@@ -170,11 +170,11 @@ class LiquidacionesService:
                 "marca_id": row["marca_id"], "marca": row["nombre_marca"],
                 "producto_id": row["producto_id"], "producto": row["nombre"], "sku": row["sku"],
                 "cantidad": 0, "bruto": Decimal("0"),
-                "metodos": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "cuenta_marca": Decimal("0")},
+                "metodos": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "credito": Decimal("0"), "cuenta_marca": Decimal("0")},
                 "comision_pos": Decimal("0"),
             })
             method = str(row["metodo_reembolso"]).strip().lower()
-            method_key = "cuenta_marca" if method == "cuenta de marca" else "tarjeta" if method == "tarjeta" else "transferencia" if method == "transferencia" else "efectivo"
+            method_key = "cuenta_marca" if method == "cuenta de marca" else "credito" if method == "crédito" else "tarjeta" if method == "tarjeta" else "transferencia" if method == "transferencia" else "efectivo"
             brand["ventas_brutas"] -= line_amount
             brand["cantidad"] -= quantity
             brand["por_metodo"][method_key] -= line_amount
@@ -190,7 +190,7 @@ class LiquidacionesService:
             brand_map.setdefault(charge["marca_id"], {
                 "marca_id": charge["marca_id"], "marca": charge["nombre_marca"],
                 "ventas_brutas": Decimal("0"), "cantidad": 0,
-                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "cuenta_marca": Decimal("0")},
+                "por_metodo": {"efectivo": Decimal("0"), "tarjeta": Decimal("0"), "transferencia": Decimal("0"), "credito": Decimal("0"), "cuenta_marca": Decimal("0")},
                 "comision_pos": Decimal("0"),
             })
 
@@ -390,18 +390,18 @@ class LiquidacionesService:
         ws["B3"] = f"Estado de cuenta para {brand_info['nombre_marca']} · {brand_info['codigo'] or 'MARCA'}"
         ws["B3"].font = Font(name="Segoe UI", size=10, color=muted)
         ws["B3"].alignment = Alignment(vertical="center")
-        ws.merge_cells("I2:K2")
+        ws.merge_cells("I2:L2")
         ws["I2"] = "LIQUIDACIÓN POR MARCA"
         ws["I2"].font = Font(name="Segoe UI", size=9, bold=True, color=ink)
         ws["I2"].fill = PatternFill("solid", fgColor=blush)
         ws["I2"].alignment = Alignment(horizontal="center", vertical="center")
-        ws.merge_cells("I3:K3")
+        ws.merge_cells("I3:L3")
         ws["I3"] = f"Período {period} · {datetime.now(MANAGUA):%d/%m/%Y}"
         ws["I3"].font = Font(name="Segoe UI", size=9, color=muted)
         ws["I3"].fill = PatternFill("solid", fgColor=gold_light)
         ws["I3"].alignment = Alignment(horizontal="center", vertical="center")
 
-        ws.merge_cells("A5:K5")
+        ws.merge_cells("A5:L5")
         ws["A5"] = "DATOS DE LA MARCA"
         ws["A5"].font = Font(name="Segoe UI", size=10, bold=True, color=ink)
         ws["A5"].fill = PatternFill("solid", fgColor=pink)
@@ -428,7 +428,7 @@ class LiquidacionesService:
         summary_cells = [
             ("A8:B8", "VENTAS BRUTAS", "C8", brand["ventas_brutas"]),
             ("D8:E8", "COMPRAS DESCONTADAS", "F8", brand["total_deducciones_marca"]),
-            ("G8:H8", "NETO PARA LA MARCA", "I8:K8", brand["neto_pagar"]),
+            ("G8:H8", "NETO PARA LA MARCA", "I8:L8", brand["neto_pagar"]),
         ]
         for labels_range, label, amount_range, amount in summary_cells:
             ws.merge_cells(labels_range)
@@ -446,7 +446,7 @@ class LiquidacionesService:
             amount_cell.alignment = Alignment(vertical="center", horizontal="center")
         ws.row_dimensions[8].height = 30
 
-        ws.merge_cells("A9:K9")
+        ws.merge_cells("A9:L9")
         payment_status = settlement["estado"] if settlement else "Sin liquidación generada"
         ws["A9"] = f"ESTADO: {payment_status} · Comisión POS: C$ {brand['comision_pos']:,.2f} · Saldo de compras pendiente: C$ {brand['descuentos_pendientes'] - brand['total_deducciones_marca']:,.2f}."
         ws["A9"].font = Font(name="Segoe UI", size=9, bold=True, color=ink)
@@ -454,7 +454,7 @@ class LiquidacionesService:
         ws["A9"].alignment = Alignment(vertical="center", wrap_text=True)
         ws.row_dimensions[9].height = 25
 
-        headers = ["#", "SKU / CÓDIGO", "PRODUCTO", "UNIDADES", "VENTAS BRUTAS", "EFECTIVO", "TARJETA", "TRANSFERENCIA", "CUENTA MARCA", "COMISIÓN POS", "NETO MARCA"]
+        headers = ["#", "SKU / CÓDIGO", "PRODUCTO", "UNIDADES", "VENTAS BRUTAS", "EFECTIVO", "TARJETA", "TRANSFERENCIA", "CR?DITO", "CUENTA MARCA", "COMISIÓN POS", "NETO MARCA"]
         for column, label in enumerate(headers, start=1):
             cell = ws.cell(10, column, label)
             cell.font = Font(name="Segoe UI", size=9, bold=True, color=white if column >= 5 else ink)
@@ -467,7 +467,7 @@ class LiquidacionesService:
         for index, item in enumerate(products, start=1):
             row = start_row + index - 1
             values = [index, item.get("sku") or "—", item["producto"], item["cantidad"], item["bruto"],
-                      item["metodos"]["efectivo"], item["metodos"]["tarjeta"], item["metodos"]["transferencia"], item["metodos"]["cuenta_marca"],
+                      item["metodos"]["efectivo"], item["metodos"]["tarjeta"], item["metodos"]["transferencia"], item["metodos"]["credito"], item["metodos"]["cuenta_marca"],
                       item["comision_pos"], item["neto_marca"]]
             ws.row_dimensions[row].height = 25
             for column, value in enumerate(values, start=1):
@@ -487,7 +487,7 @@ class LiquidacionesService:
         total_label.fill = PatternFill("solid", fgColor=gold)
         total_label.alignment = Alignment(horizontal="right", vertical="center")
         totals = [brand["cantidad"], brand["ventas_brutas"], brand["por_metodo"]["efectivo"], brand["por_metodo"]["tarjeta"],
-                  brand["por_metodo"]["transferencia"], brand["por_metodo"]["cuenta_marca"], brand["comision_pos"], brand["neto_pagar"]]
+                  brand["por_metodo"]["transferencia"], brand["por_metodo"]["credito"], brand["por_metodo"]["cuenta_marca"], brand["comision_pos"], brand["neto_pagar"]]
         for column, value in enumerate(totals, start=4):
             cell = ws.cell(total_row, column, int(value) if column == 4 else float(value))
             cell.font = Font(name="Segoe UI", size=9, bold=True, color=white)
@@ -496,13 +496,13 @@ class LiquidacionesService:
             cell.number_format = "0" if column == 4 else '"C$"#,##0.00'
         ws.row_dimensions[total_row].height = 27
 
-        ws.auto_filter.ref = f"A10:J{total_row - 1}"
+        ws.auto_filter.ref = f"A10:L{total_row - 1}"
         ws.sheet_properties.pageSetUpPr.fitToPage = True
         ws.page_setup.fitToWidth = 1
         ws.page_setup.fitToHeight = 0
         ws.page_setup.orientation = "landscape"
         ws.print_title_rows = "1:10"
-        ws.print_area = f"A1:J{total_row}"
+        ws.print_area = f"A1:L{total_row}"
         ws.oddFooter.center.text = "Moon Concept Store · Liquidación mensual"
         ws.oddFooter.right.text = "Página &[Page] de &[Pages]"
 
@@ -691,14 +691,14 @@ class LiquidacionesService:
                     pid = item["producto_id"]
                     detail = detail_groups.setdefault(pid, {
                         "settlement_id": settlement_id, "product_id": pid, "quantity": 0,
-                        "cash": Decimal("0"), "card": Decimal("0"), "transfer": Decimal("0"), "account": Decimal("0"), "pos_fee": Decimal("0"),
+                "cash": Decimal("0"), "card": Decimal("0"), "transfer": Decimal("0"), "credit": Decimal("0"), "account": Decimal("0"), "pos_fee": Decimal("0"),
                         "gross": Decimal("0"),
                     })
                     amount = _decimal(item["subtotal"])
                     detail["quantity"] += int(item["cantidad"])
                     detail["gross"] += amount
                     method = str(item["metodo_pago"]).strip().lower()
-                    key = "account" if method == "cuenta de marca" else "card" if method == "tarjeta" else "transfer" if method == "transferencia" else "cash"
+                    key = "account" if method == "cuenta de marca" else "credit" if method == "crédito" else "card" if method == "tarjeta" else "transfer" if method == "transferencia" else "cash"
                     detail[key] += amount
                     detail_sales.setdefault(item["venta_id"], []).append((pid, amount, _decimal(item["comision_pos"]), _decimal(item["total"]), _decimal(item["subtotal_venta"])))
                 for sale_lines in detail_sales.values():
@@ -716,8 +716,8 @@ class LiquidacionesService:
                     db.execute(text("""
                         INSERT INTO liquidacion_detalles
                         (liquidacion_id, producto_id, cantidad_vendida, monto_efectivo, monto_tarjeta,
-                         monto_transferencia, monto_cuenta_marca, comision_pos, comision_tienda, subtotal_neto)
-                        VALUES (:settlement_id, :product_id, :quantity, :cash, :card, :transfer, :account,
+                         monto_transferencia, monto_credito, monto_cuenta_marca, comision_pos, comision_tienda, subtotal_neto)
+                        VALUES (:settlement_id, :product_id, :quantity, :cash, :card, :transfer, :credit, :account,
                                 :pos_fee, :store_fee, :net)
                     """), {
                         **detail

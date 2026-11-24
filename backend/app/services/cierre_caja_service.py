@@ -41,6 +41,10 @@ def _payments(db: Session, day: date) -> dict[str, Decimal]:
             JOIN estados e ON e.id = v.estado_id AND e.modulo = 'ventas' AND e.nombre = 'Facturada'
             WHERE v.fecha_venta >= :start AND v.fecha_venta < :end
             UNION ALL
+            SELECT lower(trim(a.metodo_pago)) AS metodo, a.monto AS monto
+            FROM abonos_cuenta_cliente a
+            WHERE a.fecha_pago >= :start AND a.fecha_pago < :end
+            UNION ALL
             SELECT lower(trim(r.metodo_reembolso)) AS metodo, -r.monto_reembolso AS monto
             FROM devoluciones_venta r
             WHERE r.estado_reembolso = 'Reembolsado'

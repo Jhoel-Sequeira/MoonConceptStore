@@ -21,6 +21,10 @@ export default function ClientesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(blankForm);
   const [saving, setSaving] = useState(false);
+  const [creditClient, setCreditClient] = useState(null);
+  const [creditAccounts, setCreditAccounts] = useState([]);
+  const [creditLoading, setCreditLoading] = useState(false);
+  const [payment, setPayment] = useState({ cuenta_id: '', monto: '', metodo_pago: 'Efectivo', referencia: '' });
 
   useEffect(() => {
     if (location.state?.globalSearch) setBuscar(location.state.globalSearch);
@@ -96,6 +100,35 @@ export default function ClientesPage() {
     }
   };
 
+  const openCredit = async (cliente) => {
+    setCreditClient(cliente);
+    setCreditLoading(true);
+    try {
+      const result = await clientesService.getCreditAccount(cliente.id);
+      setCreditAccounts(result.cuentas || []);
+      setPayment({ cuenta_id: result.cuentas?.[0]?.cuenta_id || '', monto: '', metodo_pago: 'Efectivo', referencia: '' });
+    } catch (error) {
+      notify(error.response?.data?.detail || 'No se pudo cargar el saldo del cliente.', 'error');
+      setCreditClient(null);
+    } finally { setCreditLoading(false); }
+  };
+
+  const savePayment = async (event) => {
+    event.preventDefault();
+    try {
+      setSaving(true);
+      await clientesService.registerPayment(creditClient.id, { ...payment, cuenta_id: Number(payment.cuenta_id), monto: Number(payment.monto) });
+      const result = await clientesService.getCreditAccount(creditClient.id);
+      setCreditAccounts(result.cuentas || []);
+      setPayment((current) => ({ ...current, cuenta_id: result.cuentas?.[0]?.cuenta_id || '', monto: '' }));
+      const updated = await clientesService.getById(creditClient.id);
+      setClientes((current) => current.map((item) => item.id === updated.id ? updated : item));
+      notify('Abono registrado.', 'success');
+    } catch (error) {
+      notify(error.response?.data?.detail || 'No se pudo registrar el abono.', 'error');
+    } finally { setSaving(false); }
+  };
+
   if (loading) return <SplashScreen message="Cargando clientes..." compact />;
 
   const totalCompras = clientes.reduce((sum, cliente) => sum + Number(cliente.total_compras || 0), 0);
@@ -117,7 +150,7 @@ export default function ClientesPage() {
         </button>
       </header>
 
-      <section className="grid gap-4 sm:grid-cols-2">
+      <section className="grid gap-4 sm:grid-cols-3">
         <article className="rounded-2xl bg-white p-5 shadow-sm">
           <p className="text-sm text-on-surface-variant">Clientes registrados</p>
           <p className="mt-1 text-2xl font-bold text-on-surface">{clientes.length}{buscar.trim() ? ' encontrados' : ''}</p>
@@ -125,6 +158,10 @@ export default function ClientesPage() {
         <article className="rounded-2xl bg-white p-5 shadow-sm">
           <p className="text-sm text-on-surface-variant">Compras asociadas a la búsqueda</p>
           <p className="mt-1 text-2xl font-bold text-on-surface">{formatCordobas(totalCompras)}</p>
+        </article>
+        <article className="rounded-2xl bg-white p-5 shadow-sm">
+          <p className="text-sm text-on-surface-variant">Saldo pendiente en la lista</p>
+          <p className="mt-1 text-2xl font-bold text-error">{formatCordobas(clientes.reduce((sum, cliente) => sum + Number(cliente.saldo_pendiente || 0), 0))}</p>
         </article>
       </section>
 
@@ -139,9 +176,9 @@ export default function ClientesPage() {
         </div>
         {clientes.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-left text-sm">
+            <table className="w-full min-w-[900px] text-left text-sm">
               <thead className="bg-surface-container-low text-xs uppercase tracking-wide text-on-surface-variant">
-                <tr><th className="px-5 py-3">Cliente</th><th className="px-5 py-3">Teléfono</th><th className="px-5 py-3">Correo</th><th className="px-5 py-3">Nacimiento</th><th className="px-5 py-3 text-right">Compras</th><th className="px-5 py-3 text-right">Total</th><th className="px-5 py-3" /></tr>
+                <tr><th className="px-5 py-3">Cliente</th><th className="px-5 py-3">Teléfono</th><th className="px-5 py-3">Correo</th><th className="px-5 py-3">Nacimiento</th><th className="px-5 py-3 text-right">Compras</th><th className="px-5 py-3 text-right">Total</th><th className="px-5 py-3 text-right">Saldo</th><th className="px-5 py-3" /></tr>
               </thead>
               <tbody className="divide-y divide-surface-container-low">
                 {clientes.map((cliente) => (
@@ -152,7 +189,8 @@ export default function ClientesPage() {
                     <td className="px-5 py-4 text-on-surface-variant">{formatBirthDate(cliente.fecha_nacimiento)}</td>
                     <td className="px-5 py-4 text-right tabular-nums">{Number(cliente.cantidad_compras || 0)}</td>
                     <td className="px-5 py-4 text-right font-medium tabular-nums">{formatCordobas(cliente.total_compras || 0)}</td>
-                    <td className="px-5 py-4 text-right"><button type="button" onClick={() => startEdit(cliente)} className="rounded-lg px-3 py-2 text-xs font-semibold text-primary hover:bg-primary-fixed/50">Editar</button></td>
+                    <td className="px-5 py-4 text-right font-semibold tabular-nums text-error">{formatCordobas(cliente.saldo_pendiente || 0)}</td>
+                    <td className="px-5 py-4 text-right"><button type="button" onClick={() => openCredit(cliente)} className="rounded-lg px-3 py-2 text-xs font-semibold text-primary hover:bg-primary-fixed/50">Crédito</button><button type="button" onClick={() => startEdit(cliente)} className="rounded-lg px-3 py-2 text-xs font-semibold text-primary hover:bg-primary-fixed/50">Editar</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -166,6 +204,22 @@ export default function ClientesPage() {
           </div>
         )}
       </section>
+
+      {creditClient && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreditClient(null); }}>
+        <section className="max-h-[90vh] w-full max-w-2xl space-y-4 overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
+          <div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">Cuenta por cobrar</h2><p className="text-sm text-on-surface-variant">{creditClient.nombre_cliente}</p></div><button type="button" onClick={() => setCreditClient(null)} className="rounded-lg px-3 py-2">Cerrar</button></div>
+          {creditLoading ? <p>Cargando saldo...</p> : <>
+            <div className="space-y-2">{creditAccounts.length ? creditAccounts.map((account) => <article key={account.cuenta_id} className="rounded-xl border border-outline-variant/40 p-3"><div className="flex justify-between gap-3"><strong>Factura #{account.venta_id}</strong><strong>Saldo: {formatCordobas(account.saldo_pendiente)}</strong></div><p className="text-xs text-on-surface-variant">Original {formatCordobas(account.monto_original)} · Abonado {formatCordobas(account.abonado)} · Devuelto {formatCordobas(account.devuelto)}</p>{account.abonos?.map((abono, index) => <p key={index} className="mt-1 text-xs">Abono {formatCordobas(abono.monto)} · {abono.metodo_pago} · {new Date(abono.fecha_pago).toLocaleDateString('es-NI')}</p>)}</article>) : <p className="rounded-xl bg-surface-container-low p-4 text-sm">Este cliente no tiene saldo pendiente.</p>}</div>
+            {creditAccounts.length > 0 && <form onSubmit={savePayment} className="grid gap-3 border-t pt-4 sm:grid-cols-2">
+              <label className="text-sm">Factura<select required value={payment.cuenta_id} onChange={(event) => setPayment({ ...payment, cuenta_id: event.target.value })} className="mt-1 h-10 w-full rounded-lg border px-3">{creditAccounts.map((account) => <option key={account.cuenta_id} value={account.cuenta_id}>#{account.venta_id} · saldo {formatCordobas(account.saldo_pendiente)}</option>)}</select></label>
+              <label className="text-sm">Monto del abono<input required type="number" min="0.01" max={creditAccounts.find((account) => String(account.cuenta_id) === String(payment.cuenta_id))?.saldo_pendiente || undefined} step="0.01" value={payment.monto} onChange={(event) => setPayment({ ...payment, monto: event.target.value })} className="mt-1 h-10 w-full rounded-lg border px-3" /></label>
+              <label className="text-sm">Método<select value={payment.metodo_pago} onChange={(event) => setPayment({ ...payment, metodo_pago: event.target.value })} className="mt-1 h-10 w-full rounded-lg border px-3"><option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option></select></label>
+              <label className="text-sm">Referencia (opcional)<input maxLength="120" value={payment.referencia} onChange={(event) => setPayment({ ...payment, referencia: event.target.value })} className="mt-1 h-10 w-full rounded-lg border px-3" /></label>
+              <button disabled={saving} className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-50 sm:col-span-2">{saving ? 'Guardando...' : 'Registrar abono'}</button>
+            </form>}
+          </>}
+        </section>
+      </div>}
 
       {formOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) { setFormOpen(false); setEditing(false); setForm(blankForm); } }}>

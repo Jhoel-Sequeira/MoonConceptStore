@@ -356,6 +356,10 @@ export default function POSPage() {
       notify('Selecciona la marca para emitir la factura.', 'warning');
       return;
     }
+    if (paymentMethod === 'Crédito' && (!selectedClient || facturarAMarca)) {
+      notify('Para vender a crédito, selecciona un cliente registrado.', 'warning');
+      return;
+    }
     try {
       setProcessingSale(true);
       const result = await posService.crearVenta({
@@ -836,6 +840,15 @@ export default function POSPage() {
                 </span>
                 <span></span>
               </button>
+              <button
+                type="button"
+                disabled={processingSale || !selectedClient || facturarAMarca}
+                onClick={() => handleCompleteSale('Crédito')}
+                className="p-3 rounded-xl bg-amber-50 text-amber-900 hover:bg-amber-100 flex items-center justify-between text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span className="flex items-center gap-2"><span className="material-symbols-outlined">account_balance_wallet</span> Crédito</span>
+                <span>{selectedClient ? selectedClient.nombre_cliente : 'Selecciona cliente'}</span>
+              </button>
               </>}
             </div>
             <button
@@ -861,6 +874,7 @@ export default function POSPage() {
               {invoice.efectivo_recibido !== null && <div className="flex justify-between gap-3"><span className="text-on-surface-variant">Efectivo recibido</span><strong>{formatCordobas(invoice.efectivo_recibido)}</strong></div>}
               {invoice.vuelto !== null && <div className="flex justify-between gap-3 font-bold text-primary"><span>Vuelto</span><strong>{formatCordobas(invoice.vuelto)}</strong></div>}
               <div className="flex justify-between gap-3"><span className="text-on-surface-variant">Método de pago</span><strong>{invoice.metodo_pago}</strong></div>
+              {invoice.metodo_pago === 'Crédito' && <div className="flex justify-between gap-3 font-semibold text-error"><span>Saldo pendiente</span><strong>{formatCordobas(invoice.saldo_pendiente ?? invoice.total)}</strong></div>}
             </div>
             <div className="flex flex-col gap-2">
               <button type="button" onClick={() => setReceiptOpen(true)} className="w-full rounded-full bg-[#c9a46d] px-4 py-3 text-sm font-semibold text-white shadow-sm hover:brightness-95">Ver comprobante</button>
