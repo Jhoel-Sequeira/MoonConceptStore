@@ -31,6 +31,18 @@
 .sidebar-scrollbar-hidden::-webkit-scrollbar {
   display: none;
 }
+
+.modal-scroll-overlay {
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  overflow-y: auto !important;
+  overscroll-behavior-y: contain;
+}
+
+.modal-scroll-overlay > :first-child {
+  margin-block: auto;
+}
 .login-shell { background: #fff; }
 .login-brand-panel {
   background: linear-gradient(145deg, #E9B7C3 0%, #C98796 56%, #C9A46D 140%);

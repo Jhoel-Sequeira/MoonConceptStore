@@ -232,7 +232,7 @@ export default function AdminPage() {
       </section>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowModal(false); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 modal-scroll-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowModal(false); }}>
           <section role="dialog" aria-modal="true" aria-labelledby="user-form-title" className="max-h-[95vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
             <div className="mb-5 flex items-start justify-between gap-4 border-b border-surface-container-low pb-4">
               <div><h2 id="user-form-title" className="text-lg font-semibold text-on-surface">{editingUser ? 'Editar usuario' : 'Crear usuario'}</h2><p className="mt-1 text-sm text-on-surface-variant">Configura sus datos de acceso y el rol del sistema.</p></div>
@@ -253,7 +253,7 @@ export default function AdminPage() {
       )}
 
       {credentialsToShare && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 modal-scroll-overlay">
           <section role="dialog" aria-modal="true" aria-labelledby="credentials-title" className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div><h2 id="credentials-title" className="text-lg font-semibold text-on-surface">Usuario creado</h2><p className="mt-1 text-sm text-on-surface-variant">Copia o comparte estas credenciales ahora. La contraseña no se volverá a mostrar.</p></div>

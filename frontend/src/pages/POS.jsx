@@ -723,7 +723,7 @@ export default function POSPage() {
       </div>
 
       {cameraOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 modal-scroll-overlay">
           <section role="dialog" aria-modal="true" aria-labelledby="qr-camera-title" className="w-full max-w-md overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl">
             <header className="flex items-center justify-between border-b border-surface-container-low p-4">
               <div><h2 id="qr-camera-title" className="font-bold text-on-surface">Escanear producto</h2><p className="text-xs text-on-surface-variant">Enfoca el c?digo QR del producto</p></div>
@@ -743,7 +743,7 @@ export default function POSPage() {
 
       {/* Modal Cobro */}
       {paymentModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 modal-scroll-overlay">
           <div className="bg-surface-container-lowest rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-4">
             <h3 className="font-bold text-lg text-on-surface">Seleccionar Método de Pago</h3>
             <div className="text-center py-2 bg-surface-container-low rounded-xl">
@@ -861,7 +861,7 @@ export default function POSPage() {
         </div>
       )}
       {invoice && !receiptOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 modal-scroll-overlay">
           <section role="dialog" aria-modal="true" aria-labelledby="sale-complete-title" className="w-full max-w-[350px] rounded-[2rem] border border-[#e9b7c3]/50 bg-[#fbf4f0] p-6 text-center shadow-2xl">
             <button type="button" onClick={() => setInvoice(null)} aria-label="Cerrar confirmación" className="mb-3 flex items-center text-on-surface-variant hover:text-primary"><span className="material-symbols-outlined">arrow_back</span></button>
             <h2 id="sale-complete-title" className="text-sm font-semibold text-on-surface">Venta completada</h2>
@@ -885,7 +885,7 @@ export default function POSPage() {
       )}
 
       {invoice && receiptOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/55 p-3 sm:p-6">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/55 p-3 sm:p-6 modal-scroll-overlay">
           <style>{`@media print { @page { size: 80mm auto; margin: 3mm; } body * { visibility: hidden !important; } #pos-receipt, #pos-receipt * { visibility: visible !important; } #pos-receipt { position: fixed; inset: 0 auto auto 0; width: 74mm; max-width: none; border: 0; box-shadow: none; margin: 0; padding: 2mm; } .receipt-actions { display: none !important; } }`}</style>
           <section id="pos-receipt" className="w-full max-w-[360px] bg-[#fffdfa] px-6 py-7 font-mono text-[11px] leading-relaxed text-[#382e29] shadow-2xl">
             <header className="border-b border-dashed border-[#c9a46d]/50 pb-4 text-center">

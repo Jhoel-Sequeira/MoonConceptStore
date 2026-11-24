@@ -205,7 +205,7 @@ export default function ClientesPage() {
         )}
       </section>
 
-      {creditClient && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreditClient(null); }}>
+      {creditClient && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 modal-scroll-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreditClient(null); }}>
         <section className="max-h-[90vh] w-full max-w-2xl space-y-4 overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
           <div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">Cuenta por cobrar</h2><p className="text-sm text-on-surface-variant">{creditClient.nombre_cliente}</p></div><button type="button" onClick={() => setCreditClient(null)} className="rounded-lg px-3 py-2">Cerrar</button></div>
           {creditLoading ? <p>Cargando saldo...</p> : <>
@@ -222,7 +222,7 @@ export default function ClientesPage() {
       </div>}
 
       {formOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) { setFormOpen(false); setEditing(false); setForm(blankForm); } }}>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 modal-scroll-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) { setFormOpen(false); setEditing(false); setForm(blankForm); } }}>
           <form onSubmit={saveClient} className="w-full max-w-lg space-y-4 rounded-2xl bg-white p-5 shadow-2xl">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold text-on-surface">{editing ? 'Editar cliente' : 'Registrar cliente'}</h2>

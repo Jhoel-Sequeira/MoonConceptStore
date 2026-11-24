@@ -327,7 +327,7 @@ export default function LiquidacionesPage() {
         </section>
       </>)}
 
-      {previewBrand && view === 'report' && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-3 sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewBrandId(''); }}>
+      {previewBrand && view === 'report' && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-3 sm:p-6 modal-scroll-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewBrandId(''); }}>
         <section role="dialog" aria-modal="true" aria-labelledby="brand-preview-title" className="flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-5 py-4">
             <div><h2 id="brand-preview-title" className="text-lg font-bold text-on-surface">Vista previa · {previewBrand.marca}</h2><p className="text-sm text-on-surface-variant">Liquidación de {period}</p></div>
@@ -378,7 +378,7 @@ export default function LiquidacionesPage() {
         </section>
       </>}
 
-      {selected && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}>
+      {selected && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 modal-scroll-overlay" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}>
         <section role="dialog" aria-modal="true" aria-labelledby="payment-title" className="w-full max-w-md rounded-xl bg-surface-container-lowest p-6 shadow-xl">
           <h2 id="payment-title" className="font-bold text-lg text-on-surface">Registrar pago a {selected.nombre_marca}</h2>
           <p className="text-sm text-on-surface-variant mt-1">Monto: {formatCordobas(selected.total_neto_pagar)}</p>

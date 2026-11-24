@@ -259,7 +259,7 @@ export default function DevolucionesPage() {
         </div>}
       </section>
 
-      {selectedRefund && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
+      {selectedRefund && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4 modal-scroll-overlay">
         <form role="dialog" aria-modal="true" aria-labelledby="refund-title" onSubmit={submitRefund} className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-5 shadow-2xl sm:p-6">
           <h2 id="refund-title" className="text-lg font-bold text-on-surface">Confirmar reembolso</h2>
           <p className="mt-1 text-sm text-on-surface-variant">Factura {invoiceLabel(selectedRefund.venta_id)} · {formatCordobas(selectedRefund.monto)}</p>

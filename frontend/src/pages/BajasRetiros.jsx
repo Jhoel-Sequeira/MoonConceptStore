@@ -302,7 +302,7 @@ export default function BajasRetirosPage() {
         <div className="border-t border-surface-container-low px-4 py-3 text-xs text-on-surface-variant">Mostrando {filtered.length} de {retiros.length} retiros</div>
       </section>
 
-      {modalOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setModalOpen(false); }}>
+      {modalOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-6 modal-scroll-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setModalOpen(false); }}>
         <section role="dialog" aria-modal="true" aria-labelledby="create-retiro-title" className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl sm:max-h-[calc(100dvh-3rem)]">
           <header className="flex items-start justify-between border-b border-surface-container-low p-5">
             <div><p className="text-xs font-semibold uppercase tracking-widest text-error">Movimiento de salida</p><h2 id="create-retiro-title" className="mt-1 text-xl font-bold text-on-surface">Registrar retiro de mercadería</h2><p className="mt-1 text-sm text-on-surface-variant">El stock se validará y actualizará al guardar.</p></div>
@@ -361,14 +361,14 @@ export default function BajasRetirosPage() {
         </section>
       </div>}
 
-      {cameraOpen && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setCameraOpen(false); }}>
+      {cameraOpen && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 modal-scroll-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setCameraOpen(false); }}>
         <section role="dialog" aria-modal="true" aria-labelledby="retiro-qr-title" className="w-full max-w-md overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl">
           <header className="flex items-center justify-between border-b border-surface-container-low p-4"><div><h2 id="retiro-qr-title" className="font-bold text-on-surface">Escanear producto</h2><p className="text-xs text-on-surface-variant">Enfoca el código QR del producto</p></div><button type="button" onClick={() => setCameraOpen(false)} aria-label="Cerrar escáner" className="rounded-lg p-2 hover:bg-surface-container-low"><span className="material-symbols-outlined">close</span></button></header>
           <div className="space-y-3 p-4"><video ref={videoRef} className="aspect-video w-full rounded-xl bg-black object-cover" muted playsInline />{cameraError && <p role="alert" className="rounded-lg bg-error-container p-3 text-sm text-on-error-container">{cameraError}</p>}</div>
         </section>
       </div>}
 
-      {selected && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDetail(); }}>
+      {selected && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-6 modal-scroll-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDetail(); }}>
         <section role="dialog" aria-modal="true" aria-labelledby="retiro-detail-title" className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl">
           <header className="flex items-start justify-between gap-4 border-b border-surface-container-low p-5 sm:p-6">
             <div><p className="text-xs font-semibold uppercase tracking-widest text-error">Detalle del retiro · {selected.id}</p><h2 id="retiro-detail-title" className="mt-1 text-xl font-bold text-on-surface">{detail?.marca || selected.marca}</h2><p className="mt-1 text-sm text-on-surface-variant">{detail?.motivo || selected.motivo}</p></div>

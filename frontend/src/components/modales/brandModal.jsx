@@ -86,7 +86,7 @@ export default function BrandModal({ isOpen, onClose, onSave, brandToEdit }) {
 
     return (
         <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm transition-opacity"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm transition-opacity modal-scroll-overlay"
             onClick={(e) => e.target === e.currentTarget && onClose()}
         >
             <div className="relative w-full max-w-4xl max-h-[92vh] flex flex-col bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-200">

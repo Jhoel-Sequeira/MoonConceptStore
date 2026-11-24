@@ -138,7 +138,7 @@ export default function RecepcionPage() {
         <div className="border-t border-surface-container-low px-4 py-3 text-xs text-on-surface-variant">Mostrando {filtered.length} de {ingresos.length} recepciones</div>
       </section>
 
-      {selected && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-6" onMouseDown={(e) => { if (e.target === e.currentTarget) closeDetail(); }}>
+      {selected && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-6 modal-scroll-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) closeDetail(); }}>
         <section role="dialog" aria-modal="true" aria-labelledby="recepcion-detail-title" className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl">
           <header className="flex items-start justify-between gap-4 border-b border-surface-container-low p-5 sm:p-6">
             <div><p className="text-xs font-semibold uppercase tracking-widest text-primary">Detalle de ingreso · {selected.id}</p><h2 id="recepcion-detail-title" className="mt-1 text-xl font-bold text-on-surface">{detail?.marca || selected.marca}</h2><p className="mt-1 text-sm text-on-surface-variant">{dateLabel(detail?.fecha || selected.fecha)}</p></div>

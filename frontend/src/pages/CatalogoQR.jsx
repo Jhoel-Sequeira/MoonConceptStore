@@ -645,7 +645,7 @@ export default function CatalogoQRPage() {
 
       {/* Modal: Registrar / Editar Producto */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/45 p-3 sm:items-center sm:p-6">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/45 p-3 sm:items-center sm:p-6 modal-scroll-overlay">
           <section role="dialog" aria-modal="true" aria-labelledby="product-editor-title" className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-outline-variant/20 bg-[#f8f0ec] shadow-2xl sm:max-h-[calc(100dvh-3rem)]">
             <form onSubmit={handleCreateSubmit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <header className="flex items-center gap-3 border-b border-outline-variant/20 px-5 py-4 sm:px-7">
@@ -766,7 +766,7 @@ export default function CatalogoQRPage() {
       )}
       {/* Modal: Ver Detalle del Producto y Código QR */}
       {detailProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs modal-scroll-overlay">
           <div className="bg-surface-container-lowest rounded-2xl shadow-2xl w-full max-w-xl p-6 flex flex-col gap-5 border border-surface-container-high animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-surface-container-low pb-3">
               <div className="flex items-center gap-2.5">
