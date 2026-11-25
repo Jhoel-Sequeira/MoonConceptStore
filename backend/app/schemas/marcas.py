@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from pydantic import validator
 from app.core.categories import PRODUCT_CATEGORIES
 
@@ -43,9 +44,22 @@ class MarcaBase(BaseModel):
             raise ValueError("Selecciona un rubro válido")
         return value
 
+class MarcaRentaCreate(BaseModel):
+    monto_mensual: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    dia_vencimiento: int = Field(default=1, ge=1, le=31)
+    fecha_inicio: date
+    fecha_fin: Optional[date] = None
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.fecha_fin and self.fecha_fin < self.fecha_inicio:
+            raise ValueError("La fecha de fin de renta no puede ser anterior al inicio.")
+        return self
+
 class MarcaCreate(MarcaBase):
     banco: Optional[str] = None
     no_cuenta: Optional[str] = None
+    renta: Optional[MarcaRentaCreate] = None
 
 class MarcaUpdate(BaseModel):
     nombre_marca: Optional[str] = None

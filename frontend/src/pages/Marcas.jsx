@@ -76,6 +76,10 @@ export default function MarcasPage() {
     banco: 'BAC Credomatic',
     no_cuenta: '',
     logo: '',
+    renta_monto_mensual: '',
+    renta_dia_vencimiento: '1',
+    renta_fecha_inicio: new Date().toISOString().slice(0, 10),
+    renta_fecha_fin: '',
   });
 
   // Cargar marcas desde el backend MySQL
@@ -137,6 +141,10 @@ export default function MarcasPage() {
       banco: 'BAC Credomatic',
       no_cuenta: '',
       logo: '',
+      renta_monto_mensual: '',
+      renta_dia_vencimiento: '1',
+      renta_fecha_inicio: new Date().toISOString().slice(0, 10),
+      renta_fecha_fin: '',
     });
     setIsModalOpen(true);
   };
@@ -281,6 +289,14 @@ export default function MarcasPage() {
         estado_id: parseInt(formData.estado_id, 10),
         banco: formData.banco,
         no_cuenta: formData.no_cuenta,
+        ...(!brandToEdit && {
+          renta: {
+            monto_mensual: Number(formData.renta_monto_mensual),
+            dia_vencimiento: Number(formData.renta_dia_vencimiento),
+            fecha_inicio: formData.renta_fecha_inicio,
+            fecha_fin: formData.renta_fecha_fin || null,
+          },
+        }),
       };
 
       let savedBrand = null;
@@ -1396,6 +1412,31 @@ export default function MarcasPage() {
                     </div>
                   </div>
                 </section>
+
+                {!brandToEdit && <section className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                  <div className="flex items-center justify-between border-b border-amber-200 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-xs font-bold text-amber-700">5</span>
+                      <h3 className="text-sm font-bold text-slate-800">Renta mensual de la marca</h3>
+                    </div>
+                    <span className="text-xs font-semibold text-amber-800">Requerido</span>
+                  </div>
+                  <p className="text-xs text-slate-600">Configura el monto y las fechas del contrato. El cobro mensual se genera desde el módulo Renta.</p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">Monto mensual (USD) *
+                      <input required min="0.01" step="0.01" type="number" value={formData.renta_monto_mensual} onChange={(e) => setFormData({ ...formData, renta_monto_mensual: e.target.value })} placeholder="ej. 80.00" className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 focus:border-indigo-600 focus:outline-none" />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">Día de vencimiento *
+                      <input required min="1" max="31" step="1" type="number" value={formData.renta_dia_vencimiento} onChange={(e) => setFormData({ ...formData, renta_dia_vencimiento: e.target.value })} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 focus:border-indigo-600 focus:outline-none" />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">Inicio de renta *
+                      <input required type="date" value={formData.renta_fecha_inicio} onChange={(e) => setFormData({ ...formData, renta_fecha_inicio: e.target.value })} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 focus:border-indigo-600 focus:outline-none" />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">Fin de contrato (opcional)
+                      <input type="date" min={formData.renta_fecha_inicio} value={formData.renta_fecha_fin} onChange={(e) => setFormData({ ...formData, renta_fecha_fin: e.target.value })} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 focus:border-indigo-600 focus:outline-none" />
+                    </label>
+                  </div>
+                </section>}
 
               </form>
 

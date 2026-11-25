@@ -22,6 +22,7 @@ from app.models.marcas import Marca, Cuenta
 from app.models.inventario import Kardex, Producto
 from app.models.ingresos import Ingreso, IngresoDetalle
 from app.schemas.marcas import MarcaCreate, MarcaUpdate
+from app.models.renta import RentaConfig
 from app.core.storage import delete_image, download_image, upload_image
 from app.core.categories import CATEGORY_FIELDS, PRODUCT_CATEGORIES, normalize_category, validate_category_details
 from app.services.inventario_service import InventarioService
@@ -296,8 +297,17 @@ class MarcasService:
             fecha_registro=datetime.utcnow()
         )
         db.add(marca)
-        db.commit()
-        db.refresh(marca)
+        db.flush()
+
+        if marca_in.renta:
+            db.add(RentaConfig(
+                marca_id=marca.id,
+                monto_mensual=marca_in.renta.monto_mensual,
+                dia_vencimiento=marca_in.renta.dia_vencimiento,
+                fecha_inicio=marca_in.renta.fecha_inicio,
+                fecha_fin=marca_in.renta.fecha_fin,
+                activa=True,
+            ))
 
         # Crear cuenta bancaria si fue provista
         if marca_in.banco or marca_in.no_cuenta:
@@ -307,10 +317,11 @@ class MarcasService:
                 no_cuenta=marca_in.no_cuenta
             )
             db.add(cuenta)
-            db.commit()
-            db.refresh(cuenta)
+            db.flush()
             marca.cuentas = cuenta.id
-            db.commit()
+
+        db.commit()
+        db.refresh(marca)
 
         return MarcasService.get_by_id(db, marca.id)
 

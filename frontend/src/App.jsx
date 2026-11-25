@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import LoginPage from './pages/Login';
@@ -18,15 +18,36 @@ import api from './services/api';
 import { FeedbackProvider } from './components/ui/FeedbackProvider';
 
 const canManageUsers = (user) => /admin|administrador/i.test(user?.role || '');
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+const LAST_ACTIVITY_KEY = 'moon-last-activity';
+
+const clearStoredSession = () => {
+  for (const storage of [localStorage, sessionStorage]) {
+    storage.removeItem('moon-session');
+    storage.removeItem('moon-token');
+    storage.removeItem(LAST_ACTIVITY_KEY);
+  }
+};
+
+const authStorage = () => localStorage.getItem('moon-token') ? localStorage : sessionStorage;
+
+const getInitialUser = () => {
+  try {
+    const storage = authStorage();
+    const stored = storage.getItem('moon-session');
+    if (!stored || !storage.getItem('moon-token')) return null;
+    const lastActivity = Number(storage.getItem(LAST_ACTIVITY_KEY));
+    if (lastActivity && Date.now() - lastActivity >= SESSION_TIMEOUT_MS) {
+      clearStoredSession();
+      return null;
+    }
+    if (!lastActivity) storage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
+    return JSON.parse(stored);
+  } catch { return null; }
+};
 
 export default function App() {
-  const [user, setUser] = useState(() => {
-    try {
-      const stored = localStorage.getItem('moon-session') || sessionStorage.getItem('moon-session');
-      const token = localStorage.getItem('moon-token') || sessionStorage.getItem('moon-token');
-      return stored && token ? JSON.parse(stored) : null;
-    } catch { return null; }
-  });
+  const [user, setUser] = useState(getInitialUser);
 
   const handleLogin = async (email, password, remember) => {
     const { data } = await api.post('/auth/login', { email, password });
@@ -38,16 +59,46 @@ export default function App() {
     const storage = remember ? localStorage : sessionStorage;
     storage.setItem('moon-session', JSON.stringify(signedInUser));
     storage.setItem('moon-token', data.access_token);
+    storage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
     setUser(signedInUser);
   };
 
-  const handleLogout = () => {
-    sessionStorage.removeItem('moon-session');
-    localStorage.removeItem('moon-session');
-    sessionStorage.removeItem('moon-token');
-    localStorage.removeItem('moon-token');
+  const handleLogout = useCallback(() => {
+    clearStoredSession();
     setUser(null);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!user) return undefined;
+
+    let lastWrite = 0;
+    const checkTimeout = () => {
+      const storage = authStorage();
+      const lastActivity = Number(storage.getItem(LAST_ACTIVITY_KEY)) || Date.now();
+      if (Date.now() - lastActivity >= SESSION_TIMEOUT_MS) handleLogout();
+    };
+    const recordActivity = () => {
+      const now = Date.now();
+      if (now - lastWrite < 10_000) return;
+      const storage = authStorage();
+      const lastActivity = Number(storage.getItem(LAST_ACTIVITY_KEY)) || now;
+      if (now - lastActivity >= SESSION_TIMEOUT_MS) {
+        handleLogout();
+        return;
+      }
+      storage.setItem(LAST_ACTIVITY_KEY, String(now));
+      lastWrite = now;
+    };
+    const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'wheel'];
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, recordActivity, { passive: true }));
+    const interval = window.setInterval(checkTimeout, 10_000);
+    document.addEventListener('visibilitychange', checkTimeout);
+    return () => {
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, recordActivity));
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', checkTimeout);
+    };
+  }, [user, handleLogout]);
 
   return (
     <FeedbackProvider><BrowserRouter>
