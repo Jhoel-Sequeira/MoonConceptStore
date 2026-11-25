@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import LoginPage from './pages/Login';
-import ResetPasswordPage from './pages/ResetPassword';
 import DashboardPage from './pages/Dashboard';
 import AdminPage from './pages/Admin';
 import MarcasPage from './pages/Marcas';
@@ -105,7 +104,6 @@ export default function App() {
     <FeedbackProvider><BrowserRouter>
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage onLogin={handleLogin} />} />
-        <Route path="/reset-password" element={<ResetPasswordPage onPasswordReset={handleLogout} />} />
         <Route path="/*" element={user ? (
           <Layout user={user} onLogout={handleLogout}>
             <Routes>

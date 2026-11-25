@@ -1,6 +1,5 @@
 ﻿import React, { useState } from 'react';
 import brandConfig from '../brandConfig';
-import api from '../services/api';
 
 export default function LoginPage({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -9,9 +8,6 @@ export default function LoginPage({ onLogin }) {
   const [remember, setRemember] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [forgotPassword, setForgotPassword] = useState(false);
-  const [resetLoading, setResetLoading] = useState(false);
-  const [resetMessage, setResetMessage] = useState('');
 
   const submit = async (event) => {
     event.preventDefault();
@@ -29,28 +25,6 @@ export default function LoginPage({ onLogin }) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const requestPasswordReset = async (event) => {
-    event.preventDefault();
-    setError('');
-    setResetMessage('');
-    setResetLoading(true);
-    try {
-      const { data } = await api.post('/auth/password-reset/request', { email: email.trim() });
-      setResetMessage(data.message);
-    } catch (err) {
-      setError(err.response?.data?.detail || 'No se pudo solicitar el restablecimiento. Intenta de nuevo.');
-    } finally {
-      setResetLoading(false);
-    }
-  };
-
-  const openPasswordReset = () => {
-    setError('');
-    setResetMessage('');
-    if (!email.includes('@')) setEmail('');
-    setForgotPassword(true);
   };
 
   return (
@@ -88,19 +62,7 @@ export default function LoginPage({ onLogin }) {
             <p className="mt-2 text-sm leading-6 text-on-surface-variant">Ingresa tus datos para acceder al sistema.</p>
           </div>
 
-          {forgotPassword ? <form onSubmit={requestPasswordReset} className="flex flex-col gap-5">
-            <p className="text-sm leading-6 text-on-surface-variant">Escribe el correo asociado a tu usuario. Si está registrado, te enviaremos un enlace temporal.</p>
-            <label className="flex flex-col gap-2 text-sm font-medium text-on-surface">
-              Correo electrónico
-              <div className="login-input-wrap"><span className="material-symbols-outlined">mail</span><input required autoComplete="email" type="email" maxLength={255} placeholder="nombre@tienda.com" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-            </label>
-            {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</p>}
-            {resetMessage && <p role="status" className="rounded-lg bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800">{resetMessage}</p>}
-            <button type="submit" disabled={resetLoading} className="login-submit flex items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-70">
-              {resetLoading ? 'Enviando…' : 'Enviar enlace'}
-            </button>
-            <button type="button" onClick={() => { setForgotPassword(false); setError(''); setResetMessage(''); }} className="text-sm font-semibold text-primary hover:underline">Volver a iniciar sesión</button>
-          </form> : <form onSubmit={submit} className="flex flex-col gap-5">
+          <form onSubmit={submit} className="flex flex-col gap-5">
             <label className="flex flex-col gap-2 text-sm font-medium text-on-surface">
               Usuario o correo electrónico
               <div className="login-input-wrap"><span className="material-symbols-outlined">person</span><input autoComplete="username" type="text" placeholder="admin o nombre@tienda.com" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
@@ -111,13 +73,13 @@ export default function LoginPage({ onLogin }) {
             </label>
             <div className="flex items-center justify-between -mt-1">
               <label className="flex items-center gap-2 text-sm text-on-surface-variant cursor-pointer"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="accent-primary w-4 h-4 rounded" /> Recordarme</label>
-              <button type="button" onClick={openPasswordReset} className="text-sm font-semibold text-primary hover:underline">¿Olvidaste tu contraseña?</button>
+              <button type="button" onClick={() => setError('Contacta al administrador para restablecer tu contraseña.')} className="text-sm font-semibold text-primary hover:underline">¿Olvidaste tu contraseña?</button>
             </div>
             {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</p>}
             <button type="submit" disabled={loading} className="login-submit mt-1 flex items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-sm font-semibold text-white transition-all disabled:cursor-wait disabled:opacity-70">
               {loading ? 'Verificando...' : 'Entrar al sistema'} {!loading && <span className="material-symbols-outlined text-[19px]">arrow_forward</span>}
             </button>
-          </form>}
+          </form>
           <div className="mt-8 flex items-center justify-center gap-2 text-xs text-on-surface-variant/75"><span className="material-symbols-outlined text-[16px]">storefront</span> Portal de acceso del equipo de {brandConfig.name}</div>
         </section>
       </div>
