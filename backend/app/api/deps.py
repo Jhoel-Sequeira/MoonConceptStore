@@ -27,6 +27,6 @@ def get_current_user(
     except (JWTError, TypeError, ValueError):
         raise unauthorized
     user = db.query(Usuario).filter(Usuario.id == user_id).first()
-    if user is None or user.estado_id != 4:
+    if user is None or user.estado_id != 4 or int(payload.get("ver", 0)) != user.auth_version:
         raise unauthorized
     return user

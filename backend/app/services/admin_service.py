@@ -148,6 +148,7 @@ class AdminService:
         user.rol = data.rol
         if data.password:
             user.password_hash = password_context.hash(data.password)
+            user.auth_version += 1
         try:
             db.commit()
             db.refresh(user)
