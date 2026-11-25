@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import dashboardService from '../services/dashboardService';
+import rentaService from '../services/rentaService';
 import { formatCordobas } from '../utils/currency';
 
 const formatDay = (value, options = { day: 'numeric', month: 'short' }) =>
   new Intl.DateTimeFormat('es-NI', options).format(new Date(`${value}T12:00:00`));
+const managuaDate = () => Object.fromEntries(new Intl.DateTimeFormat('en', {
+  timeZone: 'America/Managua', year: 'numeric', month: '2-digit', day: '2-digit',
+}).formatToParts(new Date()).map(({ type, value }) => [type, value]));
 
 function MetricCard({ item, loading }) {
   const iconTone = item.color === 'gold' ? 'bg-tertiary-fixed text-tertiary' : item.color === 'sand' ? 'bg-surface-container text-on-surface' : 'bg-primary-fixed text-primary';
@@ -71,6 +75,7 @@ export default function DashboardPage({ user }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [rentDueToday, setRentDueToday] = useState([]);
   const today = new Intl.DateTimeFormat('es-NI', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
 
   const loadDashboard = useCallback(async (showLoading = true) => {
@@ -80,6 +85,11 @@ export default function DashboardPage({ user }) {
       setSummary(data);
       setError('');
       setLastUpdated(new Date());
+      const { year, month, day } = managuaDate();
+      const today = `${year}-${month}-${day}`;
+      rentaService.listar(today.slice(0, 7)).then((rentData) => {
+        setRentDueToday((rentData.rentas || []).filter((rent) => rent.fecha_vencimiento === today && Number(rent.saldo) > 0));
+      }).catch(() => setRentDueToday([]));
     } catch (requestError) {
       console.error('No se pudo cargar el resumen del dashboard:', requestError);
       setError('No se pudieron cargar los datos del dashboard. Intenta actualizar.');
@@ -123,6 +133,10 @@ export default function DashboardPage({ user }) {
       </section>
 
       {error && <div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-error/20 bg-error-container/40 px-4 py-3 text-sm text-on-surface"><span>{error}</span><button type="button" onClick={() => loadDashboard()} className="shrink-0 font-semibold text-primary hover:underline">Reintentar</button></div>}
+
+      {rentDueToday.length > 0 && <section role="alert" aria-live="polite" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950 shadow-sm sm:p-5">
+        <div className="flex items-start gap-3"><span className="material-symbols-outlined mt-0.5 text-amber-700">event_available</span><div className="min-w-0 flex-1"><h2 className="font-bold">Hoy toca el abono de renta</h2><p className="mt-1 text-sm">{rentDueToday.length === 1 ? 'Esta renta vence hoy y tiene saldo pendiente:' : 'Estas rentas vencen hoy y tienen saldo pendiente:'}</p><ul className="mt-2 space-y-1 text-sm">{rentDueToday.map((rent) => <li key={rent.id} className="flex flex-wrap items-center justify-between gap-2"><span>{rent.marca} · período {rent.periodo.slice(0, 7)}</span><strong>Saldo {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(rent.saldo))}</strong></li>)}</ul><Link to="/renta" className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-amber-900 underline underline-offset-2">Ir a rentas <span className="material-symbols-outlined text-base">arrow_forward</span></Link></div></div>
+      </section>}
 
       <section aria-label="Indicadores de la tienda" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map((item) => <MetricCard key={item.title} item={item} loading={loading && !summary} />)}

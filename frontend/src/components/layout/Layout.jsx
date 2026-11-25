@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import brandConfig from '../../brandConfig';
 import clientesService from '../../services/clientesService';
 import { inventarioService } from '../../services/inventarioService';
+import rentaService from '../../services/rentaService';
 
 const navItems = [
   { name: 'Inicio', path: '/', icon: 'home' },
@@ -20,9 +21,34 @@ const navItems = [
 ];
 
 function Sidebar({ user, onLogout, open, onClose }) {
+  const [rentPending, setRentPending] = useState(false);
   const visibleNavItems = navItems.filter((item) =>
     item.path !== '/admin' || /admin|administrador/i.test(user?.role || '')
   );
+
+  useEffect(() => {
+    let active = true;
+    const refreshRentStatus = async () => {
+      const parts = Object.fromEntries(new Intl.DateTimeFormat('en', {
+        timeZone: 'America/Managua', year: 'numeric', month: '2-digit',
+      }).formatToParts(new Date()).map(({ type, value }) => [type, value]));
+      try {
+        const data = await rentaService.listar(`${parts.year}-${parts.month}`);
+        if (active) setRentPending(Number(data.resumen?.saldo_pendiente) > 0 || Number(data.resumen?.vencidas_total) > 0);
+      } catch {
+        if (active) setRentPending(false);
+      }
+    };
+    refreshRentStatus();
+    const interval = window.setInterval(refreshRentStatus, 60_000);
+    window.addEventListener('renta-updated', refreshRentStatus);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener('renta-updated', refreshRentStatus);
+    };
+  }, []);
+
   return (
     <>
       {open && <button type="button" aria-label="Cerrar menú" onClick={onClose} className="fixed inset-0 z-40 bg-[#382E29]/35 md:hidden" />}
@@ -49,6 +75,7 @@ function Sidebar({ user, onLogout, open, onClose }) {
               >
                 <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
                 <span>{item.name}</span>
+                {item.path === '/renta' && rentPending && <span aria-label="Hay rentas pendientes" title="Hay rentas pendientes" className="ml-auto h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />}
               </NavLink>
             ))}
           </nav>

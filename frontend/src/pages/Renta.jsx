@@ -57,6 +57,7 @@ export default function RentaPage() {
         rentaService.listar(period), api.get('/marcas/'),
       ]);
       setData(rentaData);
+      window.dispatchEvent(new Event('renta-updated'));
       setBrands(Array.isArray(brandResult.data) ? brandResult.data : []);
     } catch (err) {
       setError(err.response?.data?.detail || 'No se pudo cargar el control de rentas.');
