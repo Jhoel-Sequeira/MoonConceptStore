@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { BrowserQRCodeReader } from '@zxing/browser';
 import { formatCordobas } from '../utils/currency';
 import posService from '../services/posService';
 import { SplashScreen, useFeedback } from '../components/ui/FeedbackProvider';
@@ -30,6 +31,44 @@ export default function DevolucionesPage() {
   const [selectedRefund, setSelectedRefund] = useState(null);
   const [refundReference, setRefundReference] = useState('');
   const [busy, setBusy] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (!cameraOpen) return undefined;
+    let stopped = false;
+    let controls;
+    const startCamera = async () => {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        setCameraError('La cámara requiere HTTPS y permiso para acceder al dispositivo.');
+        return;
+      }
+      try {
+        const reader = new BrowserQRCodeReader();
+        const activeControls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
+          if (result && !stopped) {
+            const code = result.getText().trim();
+            const next = { ...filters, producto: code };
+            setFilters(next);
+            setActiveFilters(next);
+            setPage(1);
+            setExpandedSaleId(null);
+            setCameraOpen(false);
+          }
+        });
+        if (stopped) activeControls.stop();
+        else controls = activeControls;
+      } catch (error) {
+        setCameraError(error.name === 'NotAllowedError'
+          ? 'No se concedió permiso para usar la cámara.'
+          : 'No se pudo iniciar la cámara. Verifica que el dispositivo tenga una cámara disponible.');
+      }
+    };
+    setCameraError('');
+    startCamera();
+    return () => { stopped = true; controls?.stop(); };
+  }, [cameraOpen]);
 
   useEffect(() => {
     let active = true;
@@ -157,9 +196,12 @@ export default function DevolucionesPage() {
           <label className="text-xs font-semibold text-on-surface-variant">Código de factura
             <input inputMode="numeric" value={filters.codigo} onChange={(event) => setFilters({ ...filters, codigo: event.target.value })} placeholder="000039" className="mt-1 block w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" />
           </label>
-          <label className="text-xs font-semibold text-on-surface-variant">Producto o SKU
-            <input value={filters.producto} onChange={(event) => setFilters({ ...filters, producto: event.target.value })} placeholder="Nombre o código del producto" className="mt-1 block w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" />
-          </label>
+          <div className="text-xs font-semibold text-on-surface-variant"><label htmlFor="return-product-filter">Producto o SKU</label>
+            <div className="mt-1 flex gap-2">
+              <input id="return-product-filter" value={filters.producto} onChange={(event) => setFilters({ ...filters, producto: event.target.value })} placeholder="Nombre o código del producto" className="min-w-0 flex-1 rounded-lg border border-outline-variant px-3 py-2 text-sm font-normal text-on-surface outline-none focus:border-primary" />
+              <button type="button" onClick={() => setCameraOpen(true)} aria-label="Escanear producto" title="Escanear QR con cámara" className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-on-primary hover:opacity-90"><span className="material-symbols-outlined text-[18px]">qr_code_scanner</span><span>Escanear QR</span></button>
+            </div>
+          </div>
           <div className="flex gap-2">
             <button type="submit" className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary">Buscar</button>
             <button type="button" onClick={clearFilters} className="rounded-lg border border-outline-variant px-3 py-2 text-sm font-semibold text-on-surface">Limpiar</button>
@@ -202,6 +244,7 @@ export default function DevolucionesPage() {
               {expanded && <div className="mt-4 rounded-xl border border-surface-container-high bg-surface-container-low/30 p-3 sm:p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div><h3 className="font-semibold text-on-surface">Productos de la factura</h3><p className="text-xs text-on-surface-variant">Indica cuántas unidades de cada producto deseas devolver.</p></div>
+                  {canReturn && <button type="button" onClick={() => setCameraOpen(true)} className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-on-primary hover:opacity-90"><span className="material-symbols-outlined text-[18px]">qr_code_scanner</span>Escanear QR</button>}
                   {!canReturn && <span className="rounded-full bg-surface-container-low px-3 py-1 text-xs font-semibold text-on-surface-variant">Esta factura ya no tiene unidades disponibles</span>}
                 </div>
                 <div className="flex flex-col divide-y divide-surface-container-high rounded-lg border border-surface-container-high bg-white">
@@ -258,6 +301,13 @@ export default function DevolucionesPage() {
           </div>
         </div>}
       </section>
+
+      {cameraOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4" onClick={() => setCameraOpen(false)}>
+        <section role="dialog" aria-modal="true" aria-labelledby="return-qr-title" className="w-full max-w-md overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <header className="flex items-center justify-between border-b border-surface-container-low p-4"><div><h2 id="return-qr-title" className="font-bold text-on-surface">Escanear producto</h2><p className="text-xs text-on-surface-variant">Enfoca el código QR del producto</p></div><button type="button" onClick={() => setCameraOpen(false)} aria-label="Cerrar escáner" className="rounded-lg p-2 hover:bg-surface-container-low"><span className="material-symbols-outlined">close</span></button></header>
+          <div className="p-4"><video ref={videoRef} className="aspect-video w-full rounded-lg bg-black object-cover" muted playsInline />{cameraError && <p role="alert" className="mt-3 rounded-lg bg-error-container p-3 text-sm text-error">{cameraError}</p>}</div>
+        </section>
+      </div>}
 
       {selectedRefund && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4 modal-scroll-overlay">
         <form role="dialog" aria-modal="true" aria-labelledby="refund-title" onSubmit={submitRefund} className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-5 shadow-2xl sm:p-6">

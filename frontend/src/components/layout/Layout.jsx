@@ -4,6 +4,7 @@ import brandConfig from '../../brandConfig';
 import clientesService from '../../services/clientesService';
 import { inventarioService } from '../../services/inventarioService';
 import rentaService from '../../services/rentaService';
+import api from '../../services/api';
 
 const navItems = [
   { name: 'Inicio', path: '/', icon: 'home' },
@@ -92,6 +93,12 @@ function Header({ user, onMenuOpen, onLogout }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState({ products: [], clients: [] });
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [passwords, setPasswords] = useState({ current_password: '', new_password: '', confirm_password: '' });
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
 
   useEffect(() => {
     const term = query.trim();
@@ -130,7 +137,31 @@ function Header({ user, onMenuOpen, onLogout }) {
     setQuery('');
   };
 
+  const changePassword = async (event) => {
+    event.preventDefault();
+    setPasswordError('');
+    setPasswordSuccess('');
+    if (passwords.new_password !== passwords.confirm_password) {
+      setPasswordError('Las contraseñas nuevas no coinciden.');
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      const { data } = await api.post('/auth/change-password', {
+        current_password: passwords.current_password,
+        new_password: passwords.new_password,
+      });
+      setPasswordSuccess(data.message);
+      setPasswords({ current_password: '', new_password: '', confirm_password: '' });
+    } catch (err) {
+      setPasswordError(err.response?.data?.detail || 'No se pudo actualizar la contraseña. Intenta de nuevo.');
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
   return (
+    <>
     <header className="fixed left-0 right-0 top-0 z-30 flex h-[68px] items-center justify-between gap-3 border-b border-primary-fixed-dim/50 bg-white/95 px-4 backdrop-blur-xl md:left-[238px] md:px-7">
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <button type="button" aria-label="Abrir menú" onClick={onMenuOpen} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-on-surface-variant hover:bg-surface-container-low md:hidden">
@@ -183,16 +214,16 @@ function Header({ user, onMenuOpen, onLogout }) {
           </div>}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+      <div className="relative flex shrink-0 items-center gap-2 sm:gap-4">
         <button type="button" aria-label="Notificaciones" className="relative grid h-10 w-10 place-items-center rounded-xl text-on-surface-variant hover:bg-surface-container-low">
           <span className="material-symbols-outlined">notifications</span>
           <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
         </button>
         <button
           type="button"
-          onClick={onLogout}
-          aria-label="Cerrar sesión"
-          title="Cerrar sesión"
+          onClick={() => setUserMenuOpen(!userMenuOpen)}
+          aria-label="Opciones de usuario"
+          aria-expanded={userMenuOpen}
           className="flex items-center gap-2 rounded-xl p-1.5 text-on-surface-variant transition hover:bg-surface-container-low hover:text-on-surface"
         >
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary-fixed text-on-surface">
@@ -202,10 +233,30 @@ function Header({ user, onMenuOpen, onLogout }) {
             <span className="block text-sm font-semibold leading-tight text-on-surface">{user?.name || 'Administrador'}</span>
             <span className="block text-xs text-on-surface-variant">{user?.role || 'Administrador'}</span>
           </span>
-          <span className="material-symbols-outlined px-1 text-[19px]">logout</span>
+          <span className="material-symbols-outlined px-1 text-[19px]">expand_more</span>
         </button>
+        {userMenuOpen && <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl">
+          <button type="button" onClick={() => { setUserMenuOpen(false); setPasswordError(''); setPasswordSuccess(''); setChangePasswordOpen(true); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-on-surface hover:bg-surface-container-low">
+            <span className="material-symbols-outlined text-[18px]">key</span>Cambiar contraseña
+          </button>
+          <button type="button" onClick={onLogout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-on-surface hover:bg-surface-container-low">
+            <span className="material-symbols-outlined text-[18px]">logout</span>Cerrar sesión
+          </button>
+        </div>}
       </div>
     </header>
+    {changePasswordOpen && <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !passwordSaving) setChangePasswordOpen(false); }}>
+      <form onSubmit={changePassword} className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-xl">
+        <div><h2 className="text-xl font-bold text-on-surface">Cambiar contraseña</h2><p className="mt-1 text-sm text-on-surface-variant">Confirma tu contraseña actual y escribe una nueva de al menos 8 caracteres.</p></div>
+        {passwordError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{passwordError}</div>}
+        {passwordSuccess && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{passwordSuccess}</div>}
+        <label className="block text-sm font-medium text-on-surface">Contraseña actual<input required minLength="1" maxLength="72" autoComplete="current-password" type="password" value={passwords.current_password} onChange={(event) => setPasswords({ ...passwords, current_password: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5 font-normal outline-none focus:border-primary" /></label>
+        <label className="block text-sm font-medium text-on-surface">Nueva contraseña<input required minLength="8" maxLength="72" autoComplete="new-password" type="password" value={passwords.new_password} onChange={(event) => setPasswords({ ...passwords, new_password: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5 font-normal outline-none focus:border-primary" /></label>
+        <label className="block text-sm font-medium text-on-surface">Confirmar contraseña nueva<input required minLength="8" maxLength="72" autoComplete="new-password" type="password" value={passwords.confirm_password} onChange={(event) => setPasswords({ ...passwords, confirm_password: event.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 p-2.5 font-normal outline-none focus:border-primary" /></label>
+        <div className="flex justify-end gap-2"><button type="button" disabled={passwordSaving} onClick={() => setChangePasswordOpen(false)} className="rounded-lg border border-stone-200 px-4 py-2 text-sm">Cerrar</button>{!passwordSuccess && <button type="submit" disabled={passwordSaving} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{passwordSaving ? 'Guardando…' : 'Actualizar contraseña'}</button>}</div>
+      </form>
+    </div>}
+    </>
   );
 }
 
