@@ -16,6 +16,45 @@ const estimateLineRefund = (item, quantity) => {
   return Math.round(Number(item.subtotal || 0) * quantity / Number(item.cantidad_vendida) * 100) / 100;
 };
 
+function QrScannerModal({ onClose, onScan }) {
+  const [cameraError, setCameraError] = useState('');
+  const videoRef = useRef(null);
+  const onScanRef = useRef(onScan);
+  onScanRef.current = onScan;
+
+  useEffect(() => {
+    let stopped = false;
+    let controls;
+    const startCamera = async () => {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        setCameraError('La cámara requiere HTTPS y permiso para acceder al dispositivo.');
+        return;
+      }
+      try {
+        const reader = new BrowserQRCodeReader();
+        const activeControls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
+          if (result && !stopped) onScanRef.current(result.getText().trim());
+        });
+        if (stopped) activeControls.stop();
+        else controls = activeControls;
+      } catch (error) {
+        setCameraError(error.name === 'NotAllowedError'
+          ? 'No se concedió permiso para usar la cámara.'
+          : 'No se pudo iniciar la cámara. Verifica que el dispositivo tenga una cámara disponible.');
+      }
+    };
+    startCamera();
+    return () => { stopped = true; controls?.stop(); };
+  }, []);
+
+  return <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <section role="dialog" aria-modal="true" aria-labelledby="return-qr-title" className="w-full max-w-md overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl" onClick={(event) => event.stopPropagation()}>
+      <header className="flex items-center justify-between border-b border-surface-container-low p-4"><div><h2 id="return-qr-title" className="font-bold text-on-surface">Escanear producto</h2><p className="text-xs text-on-surface-variant">Enfoca el código QR del producto</p></div><button type="button" onClick={onClose} aria-label="Cerrar escáner" className="rounded-lg p-2 hover:bg-surface-container-low"><span className="material-symbols-outlined">close</span></button></header>
+      <div className="p-4"><video ref={videoRef} className="aspect-video w-full rounded-lg bg-black object-cover" muted playsInline />{cameraError && <p role="alert" className="mt-3 rounded-lg bg-error-container p-3 text-sm text-error">{cameraError}</p>}</div>
+    </section>
+  </div>;
+}
+
 export default function DevolucionesPage() {
   const { confirm, notify } = useFeedback();
   const [filters, setFilters] = useState({ desde: '', hasta: '', codigo: '', producto: '' });
@@ -32,43 +71,6 @@ export default function DevolucionesPage() {
   const [refundReference, setRefundReference] = useState('');
   const [busy, setBusy] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
-  const [cameraError, setCameraError] = useState('');
-  const videoRef = useRef(null);
-
-  useEffect(() => {
-    if (!cameraOpen) return undefined;
-    let stopped = false;
-    let controls;
-    const startCamera = async () => {
-      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-        setCameraError('La cámara requiere HTTPS y permiso para acceder al dispositivo.');
-        return;
-      }
-      try {
-        const reader = new BrowserQRCodeReader();
-        const activeControls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
-          if (result && !stopped) {
-            const code = result.getText().trim();
-            const next = { ...filters, producto: code };
-            setFilters(next);
-            setActiveFilters(next);
-            setPage(1);
-            setExpandedSaleId(null);
-            setCameraOpen(false);
-          }
-        });
-        if (stopped) activeControls.stop();
-        else controls = activeControls;
-      } catch (error) {
-        setCameraError(error.name === 'NotAllowedError'
-          ? 'No se concedió permiso para usar la cámara.'
-          : 'No se pudo iniciar la cámara. Verifica que el dispositivo tenga una cámara disponible.');
-      }
-    };
-    setCameraError('');
-    startCamera();
-    return () => { stopped = true; controls?.stop(); };
-  }, [cameraOpen]);
 
   useEffect(() => {
     let active = true;
@@ -120,6 +122,16 @@ export default function DevolucionesPage() {
 
   const refundEstimate = (sale) => selectedLines(sale)
     .reduce((sum, { item, cantidad }) => sum + estimateLineRefund(item, cantidad), 0);
+
+  const handleScannedCode = (value) => {
+    const code = value.replace(/^BHPOS-/i, '');
+    const next = { ...filters, producto: code };
+    setFilters(next);
+    setActiveFilters(next);
+    setPage(1);
+    setExpandedSaleId(null);
+    setCameraOpen(false);
+  };
 
   const submitReturn = async (sale) => {
     const lines = selectedLines(sale);
@@ -302,12 +314,7 @@ export default function DevolucionesPage() {
         </div>}
       </section>
 
-      {cameraOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4" onClick={() => setCameraOpen(false)}>
-        <section role="dialog" aria-modal="true" aria-labelledby="return-qr-title" className="w-full max-w-md overflow-hidden rounded-2xl bg-surface-container-lowest shadow-2xl" onClick={(event) => event.stopPropagation()}>
-          <header className="flex items-center justify-between border-b border-surface-container-low p-4"><div><h2 id="return-qr-title" className="font-bold text-on-surface">Escanear producto</h2><p className="text-xs text-on-surface-variant">Enfoca el código QR del producto</p></div><button type="button" onClick={() => setCameraOpen(false)} aria-label="Cerrar escáner" className="rounded-lg p-2 hover:bg-surface-container-low"><span className="material-symbols-outlined">close</span></button></header>
-          <div className="p-4"><video ref={videoRef} className="aspect-video w-full rounded-lg bg-black object-cover" muted playsInline />{cameraError && <p role="alert" className="mt-3 rounded-lg bg-error-container p-3 text-sm text-error">{cameraError}</p>}</div>
-        </section>
-      </div>}
+      {cameraOpen && <QrScannerModal onClose={() => setCameraOpen(false)} onScan={handleScannedCode} />}
 
       {selectedRefund && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4 modal-scroll-overlay">
         <form role="dialog" aria-modal="true" aria-labelledby="refund-title" onSubmit={submitRefund} className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-5 shadow-2xl sm:p-6">
